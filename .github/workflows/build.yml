@@ -1,0 +1,54 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: '8.11.1' }
+      - name: Unit tests
+        run: gradle :audio-engine:test :ai-assistant:test --stacktrace
+      - name: Lint
+        run: gradle :app:lintDebug --stacktrace
+      - name: Build development APK
+        run: gradle :app:assembleDebug --stacktrace
+      - name: Verify and checksum
+        run: |
+          mkdir dist
+          apk="dist/NexusVisionOS-0.1.${GITHUB_RUN_NUMBER}-dev.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "$apk"
+          "$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner" verify "$apk"
+          (cd dist && sha256sum ./*.apk > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with: { name: dist, path: dist/ }
+
+  release:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: dist, path: dist }
+      - name: Publish development release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v0.1.${GITHUB_RUN_NUMBER}-dev" dist/* \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest \
+            --title "Nexus Vision OS 0.1.${GITHUB_RUN_NUMBER} (development build)" \
+            --notes "Debug-signed development APK, not production signed. Each build has a different signing key, so uninstall the previous build first (this deletes saved API keys). Not yet validated on a physical device."
