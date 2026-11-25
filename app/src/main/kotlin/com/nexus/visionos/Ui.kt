@@ -2,8 +2,9 @@ package com.nexus.visionos
 
 import android.app.Activity
 import android.view.View
-import android.view.WindowInsets
 import android.widget.*
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 
 fun Activity.dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
@@ -16,8 +17,8 @@ fun Activity.column(build: LinearLayout.() -> Unit): View {
     }
     return ScrollView(this).apply {
         addView(content)
-        setOnApplyWindowInsetsListener { v, insets ->
-            val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.ime())
+        ViewCompat.setOnApplyWindowInsetsListener(this) { v, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime())
             v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
             insets
         }

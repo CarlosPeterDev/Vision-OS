@@ -16,6 +16,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.nexus.voice.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 
@@ -29,6 +30,7 @@ class MainActivity : ComponentActivity() {
     private val usage = UsageMeter()
     private var keyStamp = ""
     private var continuousRequested = false
+    private var activeSession: Job? = null
 
     private lateinit var status: TextView
     private lateinit var provider: TextView
@@ -41,7 +43,12 @@ class MainActivity : ComponentActivity() {
     private val focus by lazy {
         AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
             .setAudioAttributes(speechAttributes)
-            .setOnAudioFocusChangeListener { if (it < 0) engine.cancel() }
+            .setOnAudioFocusChangeListener {
+                // The system recognizer may take transient focus itself, so that only stops playback.
+                val lostForGood = it == AudioManager.AUDIOFOCUS_LOSS
+                val interrupted = it < 0 && engine.state.value == VoiceState.SPEAKING
+                if (lostForGood || interrupted) engine.cancel()
+            }
             .build()
     }
 
@@ -154,7 +161,11 @@ class MainActivity : ComponentActivity() {
         }
         problem.text = ""
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        engine.start(settings.selectedLanguage, continuous)
+        val session = engine.start(settings.selectedLanguage, continuous)
+        activeSession = session
+        session.invokeOnCompletion {
+            runOnUiThread { if (activeSession === session) audioManager.abandonAudioFocusRequest(focus) }
+        }
     }
 
     private fun stopVoice() {

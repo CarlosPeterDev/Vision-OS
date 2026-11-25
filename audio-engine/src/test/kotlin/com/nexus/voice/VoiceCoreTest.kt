@@ -159,6 +159,20 @@ class VoiceCoreTest {
         assertEquals(ErrorKind.NETWORK, run())
     }
 
+    @Test fun scribeSilenceTimesOutAndCloses() {
+        var closed = false
+        val silent = object : SocketFactory {
+            override suspend fun open(url: String, headers: Map<String, String>) = object : SocketSession {
+                override val incoming = flow<String> { awaitCancellation() }
+                override fun send(text: String) = true
+                override fun close() { closed = true }
+            }
+        }
+        val stt = ScribeStt(silent, api(FakeHttp()), cfg, mic, UsageMeter(), idleTimeoutMs = 100)
+        assertEquals(ErrorKind.NO_SPEECH, kindOf { withTimeout(3000) { stt.listen(null).toList() } })
+        assertTrue(closed)
+    }
+
     private fun tone(amplitude: Int) = ShortArray(320) { (if (it % 2 == 0) amplitude else -amplitude).toShort() }
 
     @Test fun vadHasAttackAndRelease() {

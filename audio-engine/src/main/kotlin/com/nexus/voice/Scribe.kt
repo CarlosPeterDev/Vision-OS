@@ -1,6 +1,7 @@
 package com.nexus.voice
 
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.takeWhile
@@ -48,7 +49,9 @@ class ScribeStt(
     private val api: ElevenLabsApi,
     private val config: () -> ElevenLabsConfig,
     private val microphone: AudioSource,
-    private val usage: UsageMeter
+    private val usage: UsageMeter,
+    /** Ends a session with no transcript activity, so silence cannot keep spending quota. */
+    private val idleTimeoutMs: Long = 12_000
 ) : SttProvider {
     override val name = "ElevenLabs Scribe"
 
@@ -57,6 +60,7 @@ class ScribeStt(
         val session = network { sockets.open(ScribeProtocol.url(config(), language), api.headers()) }
         var samples = 0L
         var gotFinal = false
+        var lastHeard = System.nanoTime()
         try {
             val upload = launch {
                 microphone.frames().collect { frame ->
@@ -66,17 +70,26 @@ class ScribeStt(
                     samples += frame.size
                 }
             }
+            val watchdog = launch {
+                while (true) {
+                    val left = idleTimeoutMs - (System.nanoTime() - lastHeard) / 1_000_000
+                    if (left <= 0) throw VoiceException(ErrorKind.NO_SPEECH, "No speech heard")
+                    delay(left)
+                }
+            }
             try {
                 network {
                     session.incoming.takeWhile { !gotFinal }.collectUntilFinal { event ->
                         // An empty commit means silence; keep listening.
                         if (event is SttEvent.Final && event.text.isBlank()) return@collectUntilFinal false
+                        lastHeard = System.nanoTime()
                         send(event)
                         if (event is SttEvent.Final) gotFinal = true
                         gotFinal
                     }
                 }
             } finally {
+                watchdog.cancelAndJoin()
                 upload.cancelAndJoin()
             }
             if (!gotFinal) throw VoiceException(ErrorKind.NETWORK, "Scribe closed before a final transcript")

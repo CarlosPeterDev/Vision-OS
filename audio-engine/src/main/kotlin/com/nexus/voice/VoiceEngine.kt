@@ -28,16 +28,16 @@ class VoiceEngine(
     private var job: Job? = null
 
     /** Starts one turn; in [continuous] mode it listens again after each reply. */
-    fun start(language: Language?, continuous: Boolean = false) {
+    fun start(language: Language?, continuous: Boolean = false): Job {
         val previous = job
         previous?.cancel()
         tts.stop()
-        job = scope.launch {
+        return scope.launch {
             previous?.join() // the microphone must be released before reopening it
             do {
                 val keepGoing = turn(language)
             } while (continuous && keepGoing)
-        }
+        }.also { job = it }
     }
 
     /** Stops speech, model streaming and recognition. */
