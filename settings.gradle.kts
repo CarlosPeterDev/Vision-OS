@@ -4,4 +4,4 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
 rootProject.name = "NexusVisionOS"
-include(":app", ":audio-engine", ":ai-assistant")
+include(":app", ":audio-engine", ":ai-assistant", ":xr-engine")

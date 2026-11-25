@@ -1,6 +1,8 @@
 package com.nexus.visionos
 
 import android.Manifest
+import android.app.AlertDialog
+import com.nexus.visionos.xr.XrActivity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioFocusRequest
@@ -17,17 +19,13 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.nexus.voice.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private lateinit var settings: Settings
     private lateinit var secrets: SecretStore
-    private lateinit var api: ElevenLabsApi
-    private lateinit var systemTts: SystemTts
+    private lateinit var stack: VoiceStack
     private lateinit var engine: VoiceEngine
-    private val health = CloudHealthPair()
-    private val usage = UsageMeter()
     private var keyStamp = ""
     private var continuousRequested = false
     private var activeSession: Job? = null
@@ -58,36 +56,20 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        settings = Settings(this)
-        secrets = SecretStore(this)
-        val client = newHttpClient()
-        val transport = OkHttpTransport(client)
-        api = ElevenLabsApi(transport, settings::elevenLabs) { secrets.get(SecretStore.ELEVENLABS) }
-        val mic = MicSource()
-        systemTts = SystemTts(this)
-        val cloudEnabled = { settings.cloudVoice && secrets.has(SecretStore.ELEVENLABS) }
-        val stt = FallbackStt(
-            ScribeStt(OkHttpSockets(client), api, settings::elevenLabs, mic, usage), SystemStt(applicationContext),
-            health.stt, cloudEnabled
-        ) { fallbackNotice("STT", it) }
-        // Without a selected voice, speech output stays on Android and STT can still use Scribe.
-        val tts = FallbackTts(
-            ElevenLabsTts(transport, api, settings::elevenLabs, TrackSink(), usage), systemTts,
-            health.tts, { cloudEnabled() && settings.voiceId.isNotBlank() }
-        ) { fallbackNotice("TTS", it) }
-        val llm = LlmClient(client, settings, secrets) { getString(R.string.echo_prefix) }
-        val interrupt: (() -> Flow<Unit>)? = if (MicSource.supportsBargeIn) ({ gatedBargeIn(mic) }) else null
-        engine = VoiceEngine(lifecycleScope, stt, tts, interrupt, llm::reply)
+        stack = VoiceStack(this, lifecycleScope, ::fallbackNotice)
+        settings = stack.settings
+        secrets = stack.secrets
+        engine = stack.engine
         buildUi()
         observe()
     }
 
-    private fun gatedBargeIn(mic: MicSource): Flow<Unit> =
-        if (settings.bargeIn) mic.bargeIn() else kotlinx.coroutines.flow.emptyFlow()
-
     private fun buildUi() {
         setContentView(column {
             label(getString(R.string.app_name), 26f)
+            button(getString(R.string.start_spatial)) { startSpatial(false) }
+            button(getString(R.string.start_headset)) { confirmHeadset() }
+            label(getString(R.string.gesture_help))
             status = label(size = 20f)
             provider = label()
             button(getString(R.string.talk)) { requestVoice(false) }
@@ -104,6 +86,19 @@ class MainActivity : ComponentActivity() {
                 getString(if (MicSource.supportsBargeIn) R.string.barge_supported else R.string.barge_unsupported)
             )
         })
+    }
+
+    private fun startSpatial(headset: Boolean) {
+        startActivity(Intent(this, XrActivity::class.java).putExtra(XrActivity.EXTRA_HEADSET, headset))
+    }
+
+    private fun confirmHeadset() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.start_headset)
+            .setMessage(R.string.headset_warning)
+            .setPositiveButton(R.string.headset_accept) { _, _ -> startSpatial(true) }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     private fun observe() {
@@ -130,8 +125,8 @@ class MainActivity : ComponentActivity() {
 
     private fun providerText(recording: Boolean): String {
         val cloud = settings.cloudVoice && secrets.has(SecretStore.ELEVENLABS)
-        val stt = if (cloud && health.stt.available()) "ElevenLabs Scribe" else "Android"
-        val tts = if (cloud && settings.voiceId.isNotBlank() && health.tts.available()) "ElevenLabs" else "Android"
+        val stt = if (cloud && stack.sttHealth.available()) "ElevenLabs Scribe" else "Android"
+        val tts = if (cloud && settings.voiceId.isNotBlank() && stack.ttsHealth.available()) "ElevenLabs" else "Android"
         val mic = getString(if (recording) R.string.mic_on else R.string.mic_off)
         return "STT: $stt  |  TTS: $tts\n$mic"
     }
@@ -176,9 +171,9 @@ class MainActivity : ComponentActivity() {
     private fun checkUsage() {
         quota.text = "…"
         lifecycleScope.launch {
-            val session = getString(R.string.session_usage, usage.ttsCharacters, usage.sttMillis / 1000)
+            val session = getString(R.string.session_usage, stack.usage.ttsCharacters, stack.usage.sttMillis / 1000)
             quota.text = try {
-                val q = api.quota()
+                val q = stack.api.quota()
                 getString(R.string.quota, q.tier, q.used, q.limit, q.remaining) + "\n" + session
             } catch (e: CancellationException) {
                 throw e
@@ -194,8 +189,8 @@ class MainActivity : ComponentActivity() {
         val stamp = listOf(secrets.get(SecretStore.ELEVENLABS).hashCode(), settings.voiceId, settings.ttsModel, settings.sttModel).joinToString()
         if (stamp != keyStamp) {
             keyStamp = stamp
-            health.stt.reset()
-            health.tts.reset()
+            stack.sttHealth.reset()
+            stack.ttsHealth.reset()
         }
         provider.text = providerText(false)
     }
@@ -206,14 +201,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        systemTts.shutdown()
+        stack.shutdown()
         super.onDestroy()
     }
 
     private fun toast(text: String) = Toast.makeText(this, text, Toast.LENGTH_LONG).show()
-
-    private class CloudHealthPair {
-        val stt = CloudHealth()
-        val tts = CloudHealth()
-    }
 }
