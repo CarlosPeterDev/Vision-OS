@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -44,7 +46,7 @@ val fetchHandModel = tasks.register("fetchHandModel") {
             .toURL().openStream().use { input -> partial.outputStream().use { input.copyTo(it) } }
         check(partial.length() > 1_000_000) { "Hand model download is incomplete" }
         check(partial.renameTo(handModel))
-        println("hand_landmarker.task sha256: " + java.security.MessageDigest.getInstance("SHA-256")
+        println("hand_landmarker.task sha256: " + MessageDigest.getInstance("SHA-256")
             .digest(handModel.readBytes()).joinToString("") { "%02x".format(it) })
     }
 }
