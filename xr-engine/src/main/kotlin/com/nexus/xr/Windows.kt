@@ -2,7 +2,10 @@ package com.nexus.xr
 
 import kotlin.math.*
 
-enum class AppType { HOME, BROWSER, NOTES, CALCULATOR, CLOCK, MEDIA, SETTINGS, ASSISTANT, KEYBOARD }
+enum class AppType {
+    HOME, BROWSER, NOTES, CALCULATOR, CLOCK, MEDIA, SETTINGS, ASSISTANT, KEYBOARD,
+    CENTER, TUTORIAL, PHOTOS, FILES, CAMERA, LAUNCHER
+}
 
 /** A flat window on a sphere around the user, always facing the centre. */
 data class SpatialWindow(
@@ -14,30 +17,77 @@ data class SpatialWindow(
     val width: Float,
     val height: Float,
     val scale: Float = 1f,
-    val minimized: Boolean = false
+    val minimized: Boolean = false,
+    /** Bent around the viewer like a cinema screen. */
+    val curved: Boolean = false
 ) {
     val w get() = width * scale
     val h get() = height * scale
     val center get() = direction(yaw, pitch) * distance
     val right get() = Vec3(cos(yaw), 0f, sin(yaw))
     val up get() = Vec3(-sin(yaw) * sin(pitch), cos(pitch), cos(yaw) * sin(pitch))
-    fun point(u: Float, v: Float) = center + right * u + up * v
+    val forward get() = direction(yaw, pitch)
+    fun point(u: Float, v: Float): Vec3 {
+        if (!curved) return center + right * u + up * v
+        // A cylinder of radius [distance] around the viewer; [u] is arc length.
+        val angle = u / distance
+        return (forward * cos(angle) + right * sin(angle)) * distance + up * v
+    }
 
     companion object {
         const val BAR = 0.075f
+        /** Distance from the content's lower edge to the middle of the control row. */
+        const val CONTROL_DROP = 0.062f
+        const val CONTROL_RADIUS = 0.032f
+        const val CONTROL_GAP = 0.03f
         const val MIN_SCALE = 0.5f
         const val MAX_SCALE = 2.2f
     }
 }
 
-enum class Region { CONTENT, TITLE, CLOSE, MINIMIZE, FARTHER, NEARER, RESIZE }
+enum class Region { CONTENT, TITLE, GRAB, CLOSE, MINIMIZE, FARTHER, NEARER, RESIZE }
 
 /** [u] and [v] are content coordinates in [0,1] from the top left (clamped outside it). */
 data class Hit(val windowId: Int, val region: Region, val t: Float, val u: Float, val v: Float)
 
-/** Intersection of a ray with the window plane, as local metres from the centre. */
+/** One item under a window, centred at ([x], [y]) in window-local metres. */
+data class Control(val region: Region, val x: Float, val y: Float, val halfWidth: Float, val halfHeight: Float)
+
+/**
+ * The separated controls under a window: close, minimize, grab bar, farther and nearer, with a
+ * gap between each. The resize corner sits clear of them. Drawing and hit testing share this.
+ */
+fun controlLayout(win: SpatialWindow): List<Control> {
+    val r = SpatialWindow.CONTROL_RADIUS
+    val gap = SpatialWindow.CONTROL_GAP
+    val grabHalf = (win.w * 0.15f).coerceIn(0.06f, 0.13f)
+    val y = -win.h / 2 - SpatialWindow.CONTROL_DROP
+    val first = grabHalf + gap + r
+    val second = first + 2 * r + gap
+    val resizeX = maxOf(win.w / 2, second + r + gap + 0.035f)
+    return listOf(
+        Control(Region.CLOSE, -second, y, r, r),
+        Control(Region.MINIMIZE, -first, y, r, r),
+        Control(Region.GRAB, 0f, y, grabHalf, r),
+        Control(Region.FARTHER, first, y, r, r),
+        Control(Region.NEARER, second, y, r, r),
+        Control(Region.RESIZE, resizeX, y + 0.012f, 0.035f, 0.045f)
+    )
+}
+
+/** Where a ray meets a window: distance along the ray, then local metres from the centre. */
 fun planeHit(ray: Ray, win: SpatialWindow): Triple<Float, Float, Float>? {
-    val normal = direction(win.yaw, win.pitch)
+    if (win.curved) {
+        // The cylinder is centred on the viewer, so the ray direction decides the arc position.
+        val a = ray.direction dot win.right
+        val b = ray.direction dot win.up
+        val c = ray.direction dot win.forward
+        val flat = hypot(a, c)
+        if (flat < 1e-4f || c <= 0f) return null
+        val t = win.distance / flat
+        return Triple(t, atan2(a, c) * win.distance, t * b)
+    }
+    val normal = win.forward
     val denom = ray.direction dot normal
     if (denom <= 1e-4f) return null
     val t = ((win.center - ray.origin) dot normal) / denom
@@ -51,27 +101,46 @@ fun contentCoords(win: SpatialWindow, x: Float, y: Float) =
 
 fun hitTest(ray: Ray, win: SpatialWindow): Hit? {
     val (t, x, y) = planeHit(ray, win) ?: return null
-    val bar = SpatialWindow.BAR
     val halfW = win.w / 2
     val halfH = win.h / 2
-    if (abs(x) > halfW) return null
     val region = when {
-        abs(y) <= halfH -> Region.CONTENT
-        y > halfH && y <= halfH + bar -> {
-            // Square buttons from the right edge: close, minimize, farther, nearer.
-            when (((halfW - x) / bar).toInt()) {
-                0 -> Region.CLOSE
-                1 -> Region.MINIMIZE
-                2 -> Region.FARTHER
-                3 -> Region.NEARER
-                else -> Region.TITLE
-            }
+        abs(x) <= halfW && abs(y) <= halfH -> Region.CONTENT
+        abs(x) <= halfW && y > halfH && y <= halfH + SpatialWindow.BAR -> Region.TITLE
+        y < -halfH -> {
+            // Hit areas reach into half of each gap, which forgives an unsteady hand.
+            val slack = SpatialWindow.CONTROL_GAP * 0.45f
+            controlLayout(win).firstOrNull {
+                abs(x - it.x) <= it.halfWidth + slack && abs(y - it.y) <= it.halfHeight + slack
+            }?.region ?: return null
         }
-        y < -halfH && y >= -halfH - bar && x >= halfW - bar * 3 -> Region.RESIZE
         else -> return null
     }
     val (u, v) = contentCoords(win, x, y)
     return Hit(win.id, region, t, u, v)
+}
+
+/**
+ * Saves window arrangements relative to the viewing direction, so they come back in the same
+ * shape wherever the user faces next time.
+ */
+object LayoutCodec {
+    fun encode(windows: List<SpatialWindow>, headYaw: Float, headPitch: Float): String =
+        windows.filter { !it.minimized }.joinToString(";") {
+            val yaw = atan2(sin(it.yaw - headYaw), cos(it.yaw - headYaw))
+            "${it.app.name},$yaw,${it.pitch - headPitch},${it.distance},${it.scale},${it.curved}"
+        }
+
+    fun decode(text: String, headYaw: Float, headPitch: Float): List<SpatialWindow> =
+        text.split(';').mapNotNull { item ->
+            val p = item.split(',')
+            if (p.size != 6) return@mapNotNull null
+            val app = AppType.entries.firstOrNull { it.name == p[0] } ?: return@mapNotNull null
+            val n = (1..4).map { p[it].toFloatOrNull()?.takeIf { v -> v.isFinite() } ?: return@mapNotNull null }
+            SpatialWindow(
+                0, app, headYaw + n[0], (headPitch + n[1]).coerceIn(-1.1f, 1.1f), n[2].coerceIn(0.9f, 3.5f),
+                0f, 0f, n[3].coerceIn(SpatialWindow.MIN_SCALE, SpatialWindow.MAX_SCALE), curved = p[5] == "true"
+            )
+        }.distinctBy { it.app }
 }
 
 /** Window list in focus order: the last element is focused. Not thread safe. */
@@ -100,12 +169,7 @@ class WindowManager(private val maxWindows: Int = 6) {
             onEvict(victim.id)
         }
         val keyboard = app == AppType.KEYBOARD
-        val (width, height) = when (app) {
-            AppType.KEYBOARD -> 0.95f to 0.38f
-            AppType.CALCULATOR -> 0.5f to 0.68f
-            AppType.BROWSER, AppType.MEDIA -> 1.2f to 0.75f
-            else -> 0.9f to 0.65f
-        }
+        val (width, height) = sizeOf(app)
         // Fan new windows out around the current heading so they do not cover each other.
         val used = items.count { !it.minimized && it.app != AppType.KEYBOARD }
         val offset = if (keyboard) 0f else floatArrayOf(0f, 0.62f, -0.62f, 1.24f, -1.24f, 0f)[used % 6]
@@ -115,6 +179,26 @@ class WindowManager(private val maxWindows: Int = 6) {
         )
         items += window
         return window
+    }
+
+    private fun sizeOf(app: AppType) = when (app) {
+        AppType.KEYBOARD -> 0.95f to 0.42f
+        AppType.CALCULATOR -> 0.55f to 0.72f
+        AppType.BROWSER, AppType.MEDIA, AppType.PHOTOS -> 1.2f to 0.75f
+        else -> 0.9f to 0.65f
+    }
+
+    /** Reopens saved windows where they were; the keyboard is never restored. */
+    fun restore(saved: List<SpatialWindow>) {
+        for (want in saved.filter { it.app != AppType.KEYBOARD }.take(maxWindows)) {
+            val window = find(want.app) ?: open(want.app, want.yaw, want.pitch)
+            replace(
+                window.copy(
+                    yaw = want.yaw, pitch = want.pitch, distance = want.distance,
+                    scale = want.scale, curved = want.curved, minimized = false
+                )
+            )
+        }
     }
 
     /** The keyboard rests below the line of sight, everything else on it. */
@@ -151,7 +235,7 @@ class WindowManager(private val maxWindows: Int = 6) {
         val visible = items.filter { !it.minimized && it.app != AppType.KEYBOARD }
         visible.forEachIndexed { i, w ->
             val slot = if (i % 2 == 0) i / 2 else -(i + 1) / 2
-            replace(w.copy(yaw = headYaw + slot * 0.68f, pitch = eye, distance = 1.75f, scale = 1f))
+            replace(w.copy(yaw = headYaw + slot * 0.68f, pitch = eye, distance = 1.75f, scale = 1f, curved = false))
         }
         find(AppType.KEYBOARD)?.let { replace(it.copy(yaw = headYaw, pitch = eye - 0.38f, distance = 1.35f, scale = 1f)) }
     }

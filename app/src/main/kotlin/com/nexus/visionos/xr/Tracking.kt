@@ -70,6 +70,8 @@ class HandTracker(context: Context) : ImageAnalysis.Analyzer {
     @Volatile var minIntervalMs = 33L
     /** Extra counter-clockwise quarter turns, matching the passthrough correction. */
     @Volatile var extraTurns = 0
+    /** For phones or lenses where left and right come out reversed. */
+    @Volatile var swapSides = false
 
     private val identity = HandIdentity()
     @Volatile private var busySince = 0L
@@ -89,7 +91,15 @@ class HandTracker(context: Context) : ImageAnalysis.Analyzer {
                 if (latest == null) Log.i("NexusXR", "First hand tracking result")
                 val now = SystemClock.uptimeMillis()
                 val hands = result.landmarks().map { list -> list.map { Point(it.x(), it.y()) } }
-                latest = HandFrame(identity.assign(hands), aspect, now, now - result.timestampMs())
+                // MediaPipe names hands assuming a mirrored selfie image; the back camera is not mirrored.
+                val sides = result.handednesses().map { names ->
+                    when (names.firstOrNull()?.categoryName()) {
+                        "Left" -> if (swapSides) Side.LEFT else Side.RIGHT
+                        "Right" -> if (swapSides) Side.RIGHT else Side.LEFT
+                        else -> Side.UNKNOWN
+                    }
+                }
+                latest = HandFrame(identity.assign(hands, sides), aspect, now, now - result.timestampMs())
                 busySince = 0
             }
             .setErrorListener { error = it.message; busySince = 0 }

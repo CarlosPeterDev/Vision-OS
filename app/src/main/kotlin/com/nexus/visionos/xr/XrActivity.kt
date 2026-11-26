@@ -41,6 +41,16 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     private val controller = InteractionController(windows, this)
     private val gestures = GestureEngine()
     private val palm = PalmHold()
+    private val menuPalm = PalmHold()
+    private val gaze = GazeAim()
+    private val governor = PerformanceGovernor()
+    private val animator = WindowAnimator()
+    override val stats = Stats()
+    override val activity: android.app.Activity get() = this
+    override lateinit var settings: XrSettings
+        private set
+    private lateinit var feedback: Feedback
+    private lateinit var hud: TextView
     private val surfaces = HashMap<Int, SpatialSurface>()
 
     private lateinit var gl: GLSurfaceView
@@ -50,15 +60,14 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     private lateinit var camera: CameraFeed
     private lateinit var warning: TextView
     private lateinit var voice: VoiceStack
-    private lateinit var prefs: android.content.SharedPreferences
 
     private var stereo = false
-    private var passthrough = true
-    private var quality = 1
-    private var ipd = 0.063f
-    private var distortion = 0.22f
-    private var cameraTurns = 0
-    private var showHands = true
+    private var lensGridUntil = 0L
+    private var calibration: Calibration? = null
+    private var lastStepMs = 0L
+    private var loggedLevel = 0
+    private var highlighted = emptySet<Pair<Int, Region>>()
+    private var touchRay: Ray? = null
     private var cameraFov = 50f
     private var cameraRotation = -1
     private var cameraStartedAt = 0L
@@ -66,11 +75,14 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     private var halted: String? = null
     private var running = false
     private var lastHandFrame: HandFrame? = null
+    /** Where each hand pointer currently aims, in viewport coordinates. */
+    private val aims = HashMap<Int, Point>()
     private var pointers = emptyMap<Int, PointerState>()
     private var video: Uri? = null
     private var url: String? = null
     private var voiceNotice = ""
     private var resumedAt = 0L
+    private var startApp: AppType? = null
     private var placed = false
     private var stillForward: Vec3? = null
     private var stillSince = 0L
@@ -101,17 +113,12 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             hide(WindowInsetsCompat.Type.systemBars())
         }
-        prefs = getSharedPreferences("xr", Context.MODE_PRIVATE)
+        settings = XrSettings(this)
+        feedback = Feedback(this, settings)
         stereo = intent.getBooleanExtra(EXTRA_HEADSET, false)
-        passthrough = prefs.getBoolean("passthrough", true)
-        quality = prefs.getInt("quality", 1)
-        ipd = prefs.getFloat("ipd", 0.063f)
-        distortion = prefs.getFloat("distortion", 0.22f)
-        cameraTurns = prefs.getInt("cameraTurns", 0)
 
         head = HeadTracker(this)
         hands = HandTracker(this)
-        hands.extraTurns = cameraTurns
         camera = CameraFeed(this, hands)
         cameraFov = camera.verticalFov()
         voice = VoiceStack(this, lifecycleScope) { feature, e -> voiceNotice = "$feature → Android: ${e.message}" }
@@ -131,8 +138,22 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             visibility = View.GONE
             setOnClickListener { resumeFromWarning() }
         }
-        setContentView(FrameLayout(this).apply { addView(gl); addView(warning) })
+        hud = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 16f
+            gravity = Gravity.CENTER
+            background = LiquidGlass(0x101520, 0xC0, 0x99)
+            setPadding(36, 20, 36, 20)
+            visibility = View.GONE
+        }
+        setContentView(FrameLayout(this).apply {
+            addView(gl)
+            addView(hud, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = 24 })
+            addView(warning)
+        })
         open(AppType.HOME)
+        // Optionally opens one more window in front. The activity is not exported to other apps.
+        startApp = AppType.entries.firstOrNull { it.name == intent.getStringExtra("open") }
         if (!head.available) voiceNotice = getString(R.string.no_gyro)
     }
 
@@ -142,7 +163,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         head.start()
         running = true
         resumedAt = SystemClock.uptimeMillis()
-        if (passthrough || !cameraRunning) {
+        if (settings.passthrough || !cameraRunning) {
             if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
             else cameraPermission.launch(Manifest.permission.CAMERA)
         }
@@ -150,6 +171,9 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     }
 
     override fun onPause() {
+        saveLayout()
+        calibration = null
+        touchRay = null
         running = false
         Choreographer.getInstance().removeFrameCallback(frame)
         gestures.reset()
@@ -168,6 +192,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         camera.shutdown()
         hands.close()
         voice.shutdown()
+        feedback.release()
         super.onDestroy()
     }
 
@@ -184,7 +209,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     }
 
     private fun useVirtual(reason: String) {
-        passthrough = false
+        settings.passthrough = false
         voiceNotice = reason
     }
 
@@ -205,7 +230,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         warning.visibility = View.GONE
         camera.stop()
         cameraRunning = false
-        passthrough = false // continue safely; passthrough can be re-enabled from Controls
+        settings.passthrough = false // continue safely; passthrough can be re-enabled later
         if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
     }
 
@@ -221,6 +246,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
 
     private fun step() {
         val now = SystemClock.uptimeMillis()
+        val dt = if (lastStepMs == 0L) 0.016f else (now - lastStepMs) / 1000f
+        lastStepMs = now
         val displayRotation = rotation
         head.displayDegrees = displayRotation * 90
         if (cameraRunning && displayRotation != cameraRotation) {
@@ -228,8 +255,23 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             camera.setRotation(displayRotation)
         }
         val heat = thermal()
-        hands.minIntervalMs = if (heat >= PowerManager.THERMAL_STATUS_MODERATE) 80 else 33
+        // A slow phone gets fewer effects; heat counts the same way.
+        val measured = governor.update(renderer.fps, now)
+        val level = if (heat >= PowerManager.THERMAL_STATUS_MODERATE) PerformanceGovernor.MAX_LEVEL else measured
+        Motion.level = level
+        if (level != loggedLevel) {
+            loggedLevel = level
+            Log.i("NexusXR", "Performance level $level at ${renderer.fps} FPS")
+        }
+        hands.minIntervalMs = when {
+            heat >= PowerManager.THERMAL_STATUS_MODERATE -> 80
+            level == PerformanceGovernor.MAX_LEVEL -> 55
+            else -> 33
+        }
+        hands.extraTurns = settings.cameraTurns
+        hands.swapSides = settings.swapHandSides
         if (heat >= PowerManager.THERMAL_STATUS_SEVERE) halt(getString(R.string.too_hot))
+        val passthrough = settings.passthrough
         val lastFrame = renderer.lastCameraFrameMs
         if (passthrough && cameraRunning && now - maxOf(lastFrame, cameraStartedAt) > if (lastFrame < cameraStartedAt) FIRST_FRAME_MS else 1500) {
             halt(getString(R.string.camera_stalled))
@@ -239,15 +281,26 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         val aspect = if (gl.height > 0) eyeWidth.toFloat() / gl.height else 1.7f
         placeWhenSettled(now)
         val orientation = head.orientation()
-        val effectiveQuality = if (heat >= PowerManager.THERMAL_STATUS_MODERATE) 0 else quality
+        val quality = minOf(settings.quality, 2 - level)
         val base = Scene(
-            stereo = stereo, passthrough = passthrough, quality = effectiveQuality, ipd = ipd, distortion = distortion,
-            cameraTurns = cameraTurns, displayDegrees = displayRotation * 90, cameraFov = cameraFov
+            stereo = stereo, passthrough = passthrough, quality = quality, ipd = settings.ipd,
+            distortion = settings.distortion, cameraTurns = settings.cameraTurns,
+            displayDegrees = displayRotation * 90, cameraFov = cameraFov
         )
         val fov = viewFov(base, aspect)
         val latest = hands.latest
-        var skeletons = emptyList<List<Point>>()
-        val fresh = latest != null && now - latest.timeMs < 300
+        val fresh = latest != null && now - latest.timeMs < maxOf(300L, latest.latencyMs + 300)
+        fun toViewport(p: Point, imageAspect: Float): Point {
+            val (x, y) = coverMap(p.x, p.y, imageAspect, aspect)
+            return Point(x, y)
+        }
+        val shapes = if (latest != null && fresh) {
+            latest.hands.map { hand -> hand.points.map { toViewport(it, latest.aspect) } }
+        } else emptyList()
+
+        // Changing gesture settings releases anything held, without clicking.
+        gestures.configure(settings.gestures()).forEach { cancelPointer(it, orientation) }
+        // Pointers only advance on new tracking results, so a stalled tracker never lengthens a press.
         val updates = when {
             halted != null -> emptyList()
             latest != null && latest !== lastHandFrame -> {
@@ -257,53 +310,137 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             !fresh -> gestures.update(emptyList(), 1f, now)
             else -> null
         }
-        fun toViewport(p: Point, imageAspect: Float): Point {
-            val (x, y) = coverMap(p.x, p.y, imageAspect, aspect)
-            return Point(x, y)
-        }
-        if (latest != null && fresh) {
-            if (showHands) skeletons = latest.hands.map { hand -> hand.points.map { toViewport(it, latest.aspect) } }
-        }
         if (updates != null) {
-            for (p in updates) {
-                val v = toViewport(p.position, latest?.aspect ?: 4f / 3f)
-                controller.handle(p.handId, p.phase, viewportRay(orientation, v.x, v.y, fov, aspect))
-            }
             pointers = updates.filter { it.phase != PointerPhase.CANCEL }.associateBy { it.handId }
-        }
-        // An open palm held up brings the home window in front of the user.
-        if (palm.update(pointers.values.any { it.openPalm && !controller.isCapturing(it.handId) }, now)) {
-            val existing = windows.find(AppType.HOME)
-            if (existing != null && !existing.minimized && kotlin.math.abs(existing.yaw - yawOf(orientation)) < 0.3f &&
-                kotlin.math.abs(existing.pitch - pitchOf(orientation)) < 0.35f
-            ) {
-                windows.minimize(existing.id)
+            if (calibration != null) {
+                updates.firstOrNull()?.let { calibration?.sample(it.ratio, now) }
             } else {
-                open(AppType.HOME)
-                windows.find(AppType.HOME)?.let {
-                    windows.replace(it.copy(yaw = yawOf(orientation), pitch = pitchOf(orientation), distance = 1.5f))
+                for (p in updates) {
+                    val v = toViewport(p.position, latest?.aspect ?: 4f / 3f)
+                    val aim = if (settings.lookAndPinch) gaze.position(p.copy(position = v)) else v
+                    aims[p.handId] = aim
+                    controller.handle(p.handId, p.phase, viewportRay(orientation, aim.x, aim.y, fov, aspect))
                 }
+                aims.keys.retainAll(pointers.keys)
             }
         }
+        stepCalibration(now)
+
+        val centreRay = viewportRay(orientation, 0.5f, 0.5f, fov, aspect)
+        // With look-and-pinch the view's centre highlights even before a hand appears.
+        val gazing = settings.lookAndPinch && pointers.isEmpty() && halted == null
+        if (gazing) controller.handle(GAZE_POINTER, PointerPhase.HOVER, centreRay)
+        controller.retainHovers(pointers.keys + if (gazing) setOf(GAZE_POINTER) else emptySet())
+        // A finger resting on the screen sends no events, so its hold is advanced here.
+        touchRay?.let { controller.handle(TOUCH_POINTER, PointerPhase.MOVE, it) }
+
+        val aimed = controller.hovered().filter { it.region != Region.CONTENT && it.region != Region.TITLE }
+            .map { it.windowId to it.region }.toSet()
+        if ((aimed - highlighted).isNotEmpty()) feedback.hover()
+        highlighted = aimed
+
+        // An open hand turned away shows Home; turned towards the face it opens the quick menu.
+        val free = pointers.values.filter { it.openPalm && !controller.isCapturing(it.handId) }
+        if (palm.update(free.any { !it.palmToUser }, now)) toggleInFront(AppType.HOME, orientation)
+        if (menuPalm.update(free.any { it.palmToUser }, now)) toggleInFront(AppType.CENTER, orientation)
 
         val cursors = pointers.values.map { p ->
-            val v = toViewport(p.position, latest?.aspect ?: 4f / 3f)
-            val ray = viewportRay(orientation, v.x, v.y, fov, aspect)
+            val aim = aims[p.handId] ?: toViewport(p.position, latest?.aspect ?: 4f / 3f)
+            val ray = viewportRay(orientation, aim.x, aim.y, fov, aspect)
             val distance = windows.pick(ray)?.t ?: 1.5f
-            CursorMark(ray.direction * (distance * 0.98f), controller.isCapturing(p.handId))
-        }
+            val progress = controller.capturedWindow(p.handId)?.let { surfaces[it]?.holdProgress } ?: 0f
+            CursorMark(ray.direction * (distance * 0.98f), controller.isCapturing(p.handId), progress)
+        } + if (gazing) {
+            listOf(CursorMark(centreRay.direction * ((windows.pick(centreRay)?.t ?: 1.5f) * 0.98f), false))
+        } else emptyList()
 
+        val shown = animator.update(windows.windows, dt, level)
         syncSurfaces()
-        val visible = windows.windows.filter { !it.minimized }
+        val cinema = shown.any { it.window.curved }
         renderer.scene = Scene(
-            windows = visible,
-            titles = visible.associate { it.id to appTitle(this, it.app) },
+            windows = shown.map { it.window },
+            alphas = shown.associate { it.window.id to it.alpha },
+            titles = shown.associate { it.window.id to appTitle(this, it.window.app) },
             focusedId = windows.focused?.id ?: -1,
-            cursors = cursors, hands = skeletons,
+            highlights = highlighted,
+            cursors = cursors,
+            hands = if (settings.showHands && level < PerformanceGovernor.MAX_LEVEL) shapes else emptyList(),
+            handShapes = shapes,
+            occlusion = settings.occlusion && level < PerformanceGovernor.MAX_LEVEL,
+            environment = settings.scene,
+            dim = maxOf(settings.dim, if (cinema) CINEMA_DIM else 0f),
+            lensShift = settings.lensShift, lensHeight = settings.lensHeight, lensZoom = settings.lensZoom,
+            lensGrid = now < lensGridUntil,
             stereo = base.stereo, passthrough = base.passthrough, quality = base.quality, ipd = base.ipd,
             distortion = base.distortion, cameraTurns = base.cameraTurns, displayDegrees = base.displayDegrees,
             cameraFov = base.cameraFov, blank = halted != null
         )
+    }
+
+    private fun cancelPointer(state: PointerState, orientation: Quat) =
+        controller.handle(state.handId, PointerPhase.CANCEL, Ray(Vec3(0f, 0f, 0f), orientation.rotate(Vec3(0f, 0f, -1f))))
+
+    /** Brings a window in front of the user, or hides it if it is already there. */
+    private fun toggleInFront(app: AppType, orientation: Quat) {
+        stats.palms++
+        feedback.click()
+        val yaw = yawOf(orientation)
+        val pitch = pitchOf(orientation)
+        val existing = windows.find(app)
+        val inView = existing != null && !existing.minimized &&
+            kotlin.math.abs(kotlin.math.atan2(kotlin.math.sin(existing.yaw - yaw), kotlin.math.cos(existing.yaw - yaw))) < 0.3f &&
+            kotlin.math.abs(existing.pitch - pitch) < 0.35f
+        if (inView) windows.minimize(existing!!.id)
+        else {
+            open(app)
+            windows.find(app)?.let { windows.replace(it.copy(yaw = yaw, pitch = pitch, distance = 1.5f)) }
+        }
+    }
+
+    /** Measures an open hand, then a pinch, and derives this user's click thresholds. */
+    private class Calibration(val startedAt: Long) {
+        val open = mutableListOf<Float>()
+        val closed = mutableListOf<Float>()
+        fun sample(ratio: Float, now: Long) {
+            val t = now - startedAt
+            if (t in 2000..4500) open += ratio
+            if (t in 7000..9500) closed += ratio
+        }
+    }
+
+    private fun stepCalibration(now: Long) {
+        val current = calibration
+        if (current != null) {
+            val t = now - current.startedAt
+            if (t < 5000) showHud(getString(R.string.calibrate_open), now + 500)
+            else if (t < 9700) showHud(getString(R.string.calibrate_pinch), now + 500)
+            else {
+                calibration = null
+                val result = if (current.open.size < 4 || current.closed.size < 4) null else calibratedConfig(
+                    settings.gestures(), current.open.sorted()[current.open.size / 2], current.closed.sorted()[current.closed.size / 4]
+                )
+                if (result != null) {
+                    settings.pressRatio = result.pressRatio
+                    settings.releaseRatio = result.releaseRatio
+                }
+                showHud(getString(if (result != null) R.string.calibrate_done else R.string.calibrate_failed), now + 4000)
+            }
+        }
+        if (now > hudUntil) hud.visibility = View.GONE
+    }
+
+    private var hudUntil = 0L
+    private fun showHud(message: String, until: Long) {
+        hud.text = message
+        hud.visibility = View.VISIBLE
+        hudUntil = until
+    }
+
+    private fun saveLayout() {
+        if (!placed) return
+        // Saved relative to the window in use, so that one comes back straight ahead.
+        val anchor = windows.focused ?: return
+        settings.layout = LayoutCodec.encode(windows.windows.filter { it.app != AppType.KEYBOARD }, anchor.yaw, anchor.pitch)
     }
 
     /**
@@ -326,6 +463,16 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         head.recenter()
         val look = head.orientation()
         windows.arrange(yawOf(look), pitchOf(look))
+        if (settings.restoreLayout) windows.restore(LayoutCodec.decode(settings.layout, yawOf(look), pitchOf(look)))
+        startApp?.let { app ->
+            windows.open(app, yawOf(look), pitchOf(look))
+            windows.find(app)?.let { windows.replace(it.copy(yaw = yawOf(look), pitch = pitchOf(look), distance = 1.45f)) }
+        }
+        if (!settings.tutorialSeen && startApp == null) {
+            // Opened to the side; Home stays in front.
+            windows.open(AppType.TUTORIAL, yawOf(look), pitchOf(look))
+            windows.find(AppType.HOME)?.let { windows.focus(it.id) }
+        }
         Log.i("NexusXR", "Windows placed at pitch %.2f".format(pitchOf(look)))
     }
 
@@ -339,12 +486,14 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
 
     private fun syncSurfaces() {
         val alive = windows.windows.map { it.id }.toSet()
-        surfaces.keys.filter { it !in alive }.forEach { id -> surfaces.remove(id)?.release(); renderer.destroyWindow(id) }
+        // A closing window keeps its content until its fade has finished.
+        surfaces.keys.filter { it !in alive && !animator.isVisible(it) }
+            .forEach { id -> surfaces.remove(id)?.release(); renderer.destroyWindow(id) }
         for (win in windows.windows) {
             if (win.id in surfaces) continue
             val width = (win.width * PIXELS_PER_METRE).toInt()
             val height = (win.height * PIXELS_PER_METRE).toInt()
-            val surface = SpatialSurface(this, "nexus-${win.id}", width, height) { buildApp(it, win.app, this) }
+            val surface = SpatialSurface(this, "nexus-${win.id}", width, height, { feedback.hover() }) { buildApp(it, win.app, this) }
             surfaces[win.id] = surface
             renderer.createWindow(win.id, width, height) { target ->
                 if (surfaces[win.id] === surface) surface.attach(target)
@@ -367,6 +516,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             else -> return
         }
         if (phase == PointerPhase.DOWN) Log.i("NexusXR", "screen touch hits ${windows.pick(ray)}")
+        touchRay = if (phase == PointerPhase.DOWN || phase == PointerPhase.MOVE) ray else null
         controller.handle(TOUCH_POINTER, phase, ray)
     }
 
@@ -385,6 +535,18 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
 
     override fun onContentTouch(windowId: Int, action: TouchAction, u: Float, v: Float) {
         surfaces[windowId]?.touch(action, u, v)
+    }
+
+    override fun onContentHover(windowId: Int, u: Float, v: Float) { surfaces[windowId]?.hover(u, v) }
+    override fun onHoverEnd(windowId: Int) { surfaces[windowId]?.hoverEnd() }
+
+    override fun onPressed(region: Region) {
+        stats.presses++
+        feedback.click()
+    }
+
+    override fun onAdjusted(region: Region) {
+        if (region == Region.RESIZE) stats.resizes++ else stats.moves++
     }
 
     override fun onClosed(windowId: Int) {
@@ -409,6 +571,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     override fun pendingUrl() = url.also { url = null }
     private fun target() = windows.focused?.let { surfaces[it.id] }
     override fun typeText(text: String) { target()?.type(text) }
+    override fun textBeforeCursor() = target()?.textBeforeCursor().orEmpty()
+    override fun replaceBeforeCursor(count: Int, text: String) { target()?.replaceBeforeCursor(count, text) }
     override fun sendKey(code: Int) { target()?.key(code) }
     override fun editAction(action: Int) { target()?.menu(action) }
 
@@ -430,45 +594,57 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             (if (voiceNotice.isEmpty()) "" else "\n$voiceNotice")
     }
 
-    override fun controls(): List<Pair<String, () -> Unit>> {
-        val audio = getSystemService(AudioManager::class.java)
-        fun volume(direction: Int) = audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, 0)
-        fun brightness(delta: Float) {
-            val params = window.attributes
-            val current = if (params.screenBrightness < 0) 0.6f else params.screenBrightness
-            params.screenBrightness = (current + delta).coerceIn(0.1f, 1f)
-            window.attributes = params
-        }
-        return listOf(
-            getString(R.string.ctl_recenter) to {
-                head.recenter()
-                val look = head.orientation()
-                windows.arrange(yawOf(look), pitchOf(look))
-            },
-            getString(R.string.ctl_arrange) to {
-                val look = head.orientation()
-                windows.arrange(yawOf(look), pitchOf(look))
-            },
-            getString(R.string.ctl_environment) to { passthrough = !passthrough; cameraStartedAt = SystemClock.uptimeMillis(); save() },
-            getString(R.string.ctl_glass) to { quality = (quality + 1) % 3; save() },
-            getString(R.string.ctl_headset) to { stereo = !stereo },
-            getString(R.string.ctl_hands) to { showHands = !showHands },
-            "IPD −" to { ipd = (ipd - 0.002f).coerceAtLeast(0.052f); save() },
-            "IPD +" to { ipd = (ipd + 0.002f).coerceAtMost(0.074f); save() },
-            getString(R.string.ctl_rotate_camera) to { cameraTurns = (cameraTurns + 1) % 4; hands.extraTurns = cameraTurns; save() },
-            getString(R.string.ctl_lens_less) to { distortion = (distortion - 0.04f).coerceAtLeast(0f); save() },
-            getString(R.string.ctl_lens_more) to { distortion = (distortion + 0.04f).coerceAtMost(0.6f); save() },
-            getString(R.string.exit_spatial) to { exit() },
-            "🔉" to { volume(AudioManager.ADJUST_LOWER) },
-            "🔊" to { volume(AudioManager.ADJUST_RAISE) },
-            "🔅" to { brightness(-0.15f) },
-            "🔆" to { brightness(0.15f) }
-        )
+    override fun recenter() {
+        head.recenter()
+        arrange()
     }
 
-    private fun save() {
-        prefs.edit().putBoolean("passthrough", passthrough).putInt("quality", quality).putFloat("ipd", ipd)
-            .putFloat("distortion", distortion).putInt("cameraTurns", cameraTurns).apply()
+    override fun arrange() {
+        val look = head.orientation()
+        windows.arrange(yawOf(look), pitchOf(look))
+    }
+
+    override fun toggleHeadset() { stereo = !stereo }
+    override fun isHeadset() = stereo
+
+    override fun toggleLensGrid() {
+        val now = SystemClock.uptimeMillis()
+        lensGridUntil = if (now < lensGridUntil) 0 else now + 20_000
+        if (lensGridUntil > 0) stereo = true // it switches itself off after 20 seconds
+    }
+
+    override fun toggleCinema() {
+        val target = windows.windows.lastOrNull { it.curved }
+            ?: windows.find(AppType.MEDIA) ?: windows.focused?.takeIf { it.app != AppType.HOME }
+            ?: run { open(AppType.MEDIA); windows.find(AppType.MEDIA) } ?: return
+        val look = head.orientation()
+        windows.replace(
+            if (target.curved) target.copy(curved = false, scale = 1f, distance = 1.7f)
+            else target.copy(curved = true, scale = 1.7f, distance = 2.1f, yaw = yawOf(look), pitch = pitchOf(look), minimized = false)
+        )
+        windows.focus(target.id)
+    }
+
+    override fun startCalibration() {
+        stereo = false
+        controller.cancelAll()
+        calibration = Calibration(SystemClock.uptimeMillis())
+    }
+
+    override fun volume(direction: Int) = getSystemService(AudioManager::class.java).adjustStreamVolume(
+        AudioManager.STREAM_MUSIC, if (direction < 0) AudioManager.ADJUST_LOWER else AudioManager.ADJUST_RAISE,
+        AudioManager.FLAG_SHOW_UI
+    )
+
+    override fun brightness(delta: Float) {
+        val params = window.attributes
+        val current = if (params.screenBrightness < 0) 0.6f else params.screenBrightness
+        params.screenBrightness = (current + delta).coerceIn(0.1f, 1f)
+        window.attributes = params
+    }
+
+    override fun settingsChanged() {
+        cameraStartedAt = SystemClock.uptimeMillis()
     }
 
     override fun assistant(context: Context): SpatialApp =
@@ -479,6 +655,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     companion object {
         const val EXTRA_HEADSET = "headset"
         private const val TOUCH_POINTER = 100
+        private const val GAZE_POINTER = 101
+        private const val CINEMA_DIM = 0.7f
         private const val SETTLE_MS = 1500L
         private const val STILL_MS = 1500L
         private const val MAX_SETTLE_MS = 10_000L

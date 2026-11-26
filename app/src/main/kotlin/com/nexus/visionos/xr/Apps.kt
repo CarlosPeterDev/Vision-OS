@@ -2,8 +2,6 @@ package com.nexus.visionos.xr
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -24,97 +22,6 @@ import com.nexus.xr.AppType
 import com.nexus.xr.Calculator
 import java.io.File
 
-private fun Context.px(dp: Int) = (dp * resources.displayMetrics.density).toInt()
-
-private fun pill(color: Int, radius: Float) = GradientDrawable().apply { setColor(color); cornerRadius = radius }
-
-private fun Context.vertical(build: LinearLayout.() -> Unit) = LinearLayout(this).apply {
-    orientation = LinearLayout.VERTICAL
-    setPadding(px(10), px(10), px(10), px(10))
-    layoutDirection = View.LAYOUT_DIRECTION_LOCALE
-    build()
-}
-
-private fun LinearLayout.row(weight: Float = 0f, build: LinearLayout.() -> Unit) = LinearLayout(context).also {
-    it.orientation = LinearLayout.HORIZONTAL
-    it.build()
-    addView(it, LinearLayout.LayoutParams(-1, if (weight > 0) 0 else -2, weight))
-}
-
-private fun LinearLayout.key(text: String, weight: Float = 1f, click: () -> Unit) = Button(context).also {
-    it.text = text
-    it.isAllCaps = false
-    it.textSize = 15f
-    it.setTextColor(Color.WHITE)
-    it.background = pill(0x38FFFFFF, context.px(14).toFloat())
-    it.stateListAnimator = null
-    it.isFocusable = false
-    it.minWidth = 0
-    it.minimumWidth = 0
-    it.setPadding(0, 0, 0, 0)
-    it.setOnClickListener { _ -> click() }
-    val horizontal = orientation == LinearLayout.HORIZONTAL
-    val params = if (horizontal) LinearLayout.LayoutParams(0, -1, weight) else LinearLayout.LayoutParams(-1, -2)
-    params.setMargins(context.px(3), context.px(3), context.px(3), context.px(3))
-    addView(it, params)
-}
-
-private fun LinearLayout.text(value: String = "", size: Float = 15f) = TextView(context).also {
-    it.text = value
-    it.textSize = size
-    it.setTextColor(Color.WHITE)
-    it.setPadding(context.px(4), context.px(4), context.px(4), context.px(4))
-    addView(it, LinearLayout.LayoutParams(-1, -2))
-}
-
-private fun editor(context: Context) = EditText(context).apply {
-    showSoftInputOnFocus = false // typing comes from the spatial keyboard
-    setTextColor(Color.WHITE)
-    setHintTextColor(0x99FFFFFF.toInt())
-    background = pill(0x55000000, context.px(10).toFloat())
-    setPadding(context.px(10), context.px(8), context.px(10), context.px(8))
-}
-
-/** Re-runs [update] every [periodMs] until the returned stop function is called. */
-private fun ticker(periodMs: Long, update: () -> Unit): () -> Unit {
-    val handler = Handler(Looper.getMainLooper())
-    val task = object : Runnable {
-        override fun run() { update(); handler.postDelayed(this, periodMs) }
-    }
-    handler.post(task)
-    return { handler.removeCallbacks(task) }
-}
-
-/** What built-in apps may ask of the spatial shell. */
-interface Shell {
-    fun open(app: AppType)
-    fun openUrl(url: String)
-    fun typeText(text: String)
-    fun sendKey(code: Int)
-    fun editAction(action: Int)
-    fun pickVideo()
-    fun videoUri(): Uri?
-    fun pendingUrl(): String?
-    fun statusLine(): String
-    fun controls(): List<Pair<String, () -> Unit>>
-    fun assistant(context: Context): SpatialApp
-    fun exit()
-}
-
-fun appTitle(context: Context, app: AppType): String = context.getString(
-    when (app) {
-        AppType.HOME -> R.string.app_home
-        AppType.BROWSER -> R.string.app_browser
-        AppType.NOTES -> R.string.app_notes
-        AppType.CALCULATOR -> R.string.app_calculator
-        AppType.CLOCK -> R.string.app_clock
-        AppType.MEDIA -> R.string.app_media
-        AppType.SETTINGS -> R.string.app_controls
-        AppType.ASSISTANT -> R.string.app_assistant
-        AppType.KEYBOARD -> R.string.app_keyboard
-    }
-)
-
 fun buildApp(context: Context, type: AppType, shell: Shell): SpatialApp = when (type) {
     AppType.HOME -> home(context, shell)
     AppType.BROWSER -> browser(context, shell)
@@ -122,25 +29,12 @@ fun buildApp(context: Context, type: AppType, shell: Shell): SpatialApp = when (
     AppType.CALCULATOR -> calculator(context)
     AppType.CLOCK -> clock(context)
     AppType.MEDIA -> media(context, shell)
-    AppType.SETTINGS -> controls(context, shell)
+    AppType.SETTINGS -> settingsApp(context, shell)
     AppType.ASSISTANT -> shell.assistant(context)
     AppType.KEYBOARD -> keyboard(context, shell)
-}
-
-private fun home(context: Context, shell: Shell): SpatialApp {
-    lateinit var status: TextView
-    val view = context.vertical {
-        status = text(size = 14f).also { it.gravity = Gravity.CENTER }
-        val items = listOf(
-            "🌐" to AppType.BROWSER, "📝" to AppType.NOTES, "🧮" to AppType.CALCULATOR, "⏱" to AppType.CLOCK,
-            "🎬" to AppType.MEDIA, "✨" to AppType.ASSISTANT, "⌨" to AppType.KEYBOARD, "⚙" to AppType.SETTINGS
-        ).map { (icon, type) -> "$icon\n${appTitle(context, type)}" to { shell.open(type) } } +
-            ("▶\nYouTube" to { shell.openUrl("https://m.youtube.com") }) +
-            ("⏏\n${context.getString(R.string.exit_spatial)}" to { shell.exit() })
-        items.chunked(5).forEach { chunk -> row(1f) { chunk.forEach { (label, action) -> key(label, 1f, action) } } }
-    }
-    val stop = ticker(2000) { status.text = shell.statusLine() }
-    return SpatialApp(view, stop)
+    AppType.CENTER -> controlCenter(context, shell)
+    AppType.TUTORIAL -> tutorial(context, shell)
+    AppType.PHOTOS, AppType.FILES, AppType.CAMERA, AppType.LAUNCHER -> SpatialApp(View(context))
 }
 
 @SuppressLint("SetJavaScriptEnabled")
@@ -179,16 +73,17 @@ private fun browser(context: Context, shell: Shell): SpatialApp {
         code == KeyEvent.KEYCODE_ENTER
     }
     val bar = LinearLayout(context).apply {
-        key("‹", 1f) { if (web.canGoBack()) web.goBack() }
-        key("›", 1f) { if (web.canGoForward()) web.goForward() }
-        key("⟳", 1f) { web.reload() }
+        layoutDirection = View.LAYOUT_DIRECTION_LTR
+        iconKey(R.drawable.ic_ui_back) { if (web.canGoBack()) web.goBack() }
+        iconKey(R.drawable.ic_ui_forward) { if (web.canGoForward()) web.goForward() }
+        iconKey(R.drawable.ic_ui_reload) { web.reload() }
         addView(address, LinearLayout.LayoutParams(0, -1, 6f))
-        key("➜", 1f) { go(address.text.toString()) }
-        key("⌨", 1f) { shell.open(AppType.KEYBOARD) }
+        iconKey(R.drawable.ic_ui_go) { go(address.text.toString()) }
+        iconKey(R.drawable.ic_ui_keyboard) { shell.open(AppType.KEYBOARD) }
     }
     val view = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
-        addView(bar, LinearLayout.LayoutParams(-1, context.px(46)))
+        addView(bar, LinearLayout.LayoutParams(-1, context.px(52)))
         addView(web, LinearLayout.LayoutParams(-1, 0, 1f))
     }
     go(shell.pendingUrl() ?: "https://www.google.com")
@@ -216,7 +111,7 @@ private fun notes(context: Context, shell: Shell): SpatialApp {
     })
     val view = context.vertical {
         addView(input, LinearLayout.LayoutParams(-1, 0, 1f))
-        key("⌨ " + context.getString(R.string.app_keyboard)) { input.requestFocus(); shell.open(AppType.KEYBOARD) }
+        row(height = context.px(52)) { iconKey(R.drawable.ic_ui_keyboard) { input.requestFocus(); shell.open(AppType.KEYBOARD) } }
     }
     input.requestFocus()
     return SpatialApp(view) { handler.removeCallbacks(autosave); save() }
@@ -240,7 +135,12 @@ private fun calculator(context: Context): SpatialApp {
             row(1f) {
                 layoutDirection = View.LAYOUT_DIRECTION_LTR
                 keys.forEach { symbol ->
-                    key(symbol.removeSuffix("(").let { if (it.isEmpty()) "(" else it }) {
+                    val tint = when (symbol) {
+                        "=" -> 0x5AB0FF
+                        "÷", "×", "-", "+" -> 0xFFB066
+                        else -> 0xFFFFFF
+                    }
+                    key(symbol.removeSuffix("(").let { if (it.isEmpty()) "(" else it }, tint = tint) {
                         when (symbol) {
                             "C" -> { expression.clear(); show() }
                             "⌫" -> { if (expression.isNotEmpty()) expression.deleteCharAt(expression.length - 1); show() }
@@ -287,18 +187,18 @@ private fun clock(context: Context): SpatialApp {
         timer = text(size = 26f)
         row(1f) {
             for (minutes in listOf(1, 5, 10, 25)) key("$minutes′") { timerEnd = SystemClock.elapsedRealtime() + minutes * 60_000L }
-            key("✕") { timerEnd = 0 }
+            iconKey(R.drawable.ic_ui_close) { timerEnd = 0 }
         }
     }
     val stop = ticker(100) {
         val now = SystemClock.elapsedRealtime()
         val total = elapsed + if (startedAt > 0) now - startedAt else 0
-        watch.text = "⏱ %02d:%02d.%d".format(total / 60000, total / 1000 % 60, total / 100 % 10)
+        watch.text = context.getString(R.string.stopwatch) + "  %02d:%02d.%d".format(total / 60000, total / 1000 % 60, total / 100 % 10)
         val left = (timerEnd - now).coerceAtLeast(0)
-        timer.text = when {
-            timerEnd == 0L -> "⏳ --:--"
-            left == 0L -> "⏳ " + context.getString(R.string.time_up)
-            else -> "⏳ %02d:%02d".format((left + 999) / 60000, (left + 999) / 1000 % 60)
+        timer.text = context.getString(R.string.timer) + "  " + when {
+            timerEnd == 0L -> "--:--"
+            left == 0L -> context.getString(R.string.time_up)
+            else -> "%02d:%02d".format((left + 999) / 60000, (left + 999) / 1000 % 60)
         }
     }
     return SpatialApp(view, stop)
@@ -313,10 +213,12 @@ private fun media(context: Context, shell: Shell): SpatialApp {
         addView(FrameLayout(context).apply { addView(video, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER)) }, LinearLayout.LayoutParams(-1, 0, 1f))
         addView(LinearLayout(context).apply {
             key(context.getString(R.string.choose_video), 2f) { shell.pickVideo() }
-            key("⏪") { video.seekTo((video.currentPosition - 10_000).coerceAtLeast(0)) }
-            key("⏯") { if (video.isPlaying) video.pause() else video.start() }
-            key("⏩") { video.seekTo(video.currentPosition + 10_000) }
-        }, LinearLayout.LayoutParams(-1, context.px(50)))
+            iconKey(R.drawable.ic_ui_rewind) { video.seekTo((video.currentPosition - 10_000).coerceAtLeast(0)) }
+            iconKey(R.drawable.ic_ui_play) { video.start() }
+            iconKey(R.drawable.ic_ui_pause) { video.pause() }
+            iconKey(R.drawable.ic_ui_skip) { video.seekTo(video.currentPosition + 10_000) }
+            iconKey(R.drawable.ic_ui_media) { shell.toggleCinema() }
+        }, LinearLayout.LayoutParams(-1, context.px(56)))
     }
     video.setOnErrorListener { _, _, _ -> status.text = context.getString(R.string.media_error); true }
     val stop = ticker(500) {
@@ -329,18 +231,6 @@ private fun media(context: Context, shell: Shell): SpatialApp {
         }
     }
     return SpatialApp(view) { stop(); video.stopPlayback() }
-}
-
-private fun controls(context: Context, shell: Shell): SpatialApp {
-    lateinit var status: TextView
-    val view = context.vertical {
-        status = text(size = 13f)
-        shell.controls().chunked(3).forEach { chunk ->
-            row(1f) { chunk.forEach { (label, action) -> key(label, 1f) { action(); status.text = shell.statusLine() } } }
-        }
-    }
-    val stop = ticker(1000) { status.text = shell.statusLine() }
-    return SpatialApp(view, stop)
 }
 
 private fun keyboard(context: Context, shell: Shell): SpatialApp {
@@ -360,20 +250,20 @@ private fun keyboard(context: Context, shell: Shell): SpatialApp {
             view.row(1f) {
                 // Arabic rows are listed in right-to-left keyboard order.
                 layoutDirection = View.LAYOUT_DIRECTION_LTR
-                if (index == 2 && layout == 0) key("⇧", 1.5f) { shift = !shift; render() }
+                if (index == 2 && layout == 0) iconKey(R.drawable.ic_ui_shift, weight = 1.5f, active = shift) { shift = !shift; render() }
                 letters.forEach { c ->
                     val value = if (shift && layout == 0) c.uppercase() else c.toString()
                     key(value) { shell.typeText(value) }
                 }
-                if (index == 2) key("⌫", 1.5f) { shell.sendKey(KeyEvent.KEYCODE_DEL) }
+                if (index == 2) iconKey(R.drawable.ic_ui_delete, weight = 1.5f) { shell.sendKey(KeyEvent.KEYCODE_DEL) }
             }
         }
         view.row(1f) {
             names.forEachIndexed { i, name -> if (i != layout) key(name, 1.2f) { layout = i; render() } }
-            key("␣", 3f) { shell.typeText(" ") }
-            key("◀") { shell.sendKey(KeyEvent.KEYCODE_DPAD_LEFT) }
-            key("▶") { shell.sendKey(KeyEvent.KEYCODE_DPAD_RIGHT) }
-            key("⏎", 1.5f) { shell.sendKey(KeyEvent.KEYCODE_ENTER) }
+            key(context.getString(R.string.space), 3f) { shell.typeText(" ") }
+            iconKey(R.drawable.ic_ui_back) { shell.sendKey(KeyEvent.KEYCODE_DPAD_LEFT) }
+            iconKey(R.drawable.ic_ui_forward) { shell.sendKey(KeyEvent.KEYCODE_DPAD_RIGHT) }
+            iconKey(R.drawable.ic_ui_enter, weight = 1.5f) { shell.sendKey(KeyEvent.KEYCODE_ENTER) }
         }
         view.row(1f) {
             key(context.getString(R.string.select_all)) { shell.editAction(android.R.id.selectAll) }

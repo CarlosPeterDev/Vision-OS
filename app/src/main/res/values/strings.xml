@@ -55,7 +55,7 @@
     <string name="camera_failed">Camera stopped (%1$s). The view is hidden for safety.</string>
     <string name="start_spatial">▶ Start spatial mode (handheld)</string>
     <string name="start_headset">Headset mode (experimental)</string>
-    <string name="gesture_help">Show your hand to the back camera. Pinch thumb and index to click. Pinch and move to scroll. Pinch a window title to move it, the corner to resize; use two hands to scale. Hold an open palm to show or hide Home.</string>
+    <string name="gesture_help">Show your hand to the back camera. Pinch thumb and index and release to tap; hold 2 seconds for a long press. Pinch and move to scroll. Use the bar under a window to move it and its corner to resize. Open hand: Home. Palm towards your face: Control Center.</string>
     <string name="headset_warning">Use only while seated and still, in a clear space. Both eyes see the same single camera, so there is NO real depth. Never walk, drive or exercise. Stop if you feel unwell. Needs a phone viewer that leaves the back camera uncovered. Lens correction is not calibrated.</string>
     <string name="headset_accept">I am seated</string>
     <string name="app_home">Home</string>
@@ -97,4 +97,89 @@
     <string name="ctl_rotate_camera">Rotate camera 90°</string>
     <string name="ctl_lens_less">Lens −</string>
     <string name="ctl_lens_more">Lens +</string>
+    <string name="app_center">Control Center</string>
+    <string name="app_tutorial">Tutorial</string>
+    <string name="app_photos">Photos</string>
+    <string name="app_files">Files</string>
+    <string name="app_camera">Capture</string>
+    <string name="app_launcher">My apps</string>
+    <string name="net_offline">Offline</string>
+    <string name="net_wifi">Wi-Fi</string>
+    <string name="net_mobile">Mobile data</string>
+    <string name="net_other">Online</string>
+    <string name="battery">Battery %1$d%%</string>
+    <string name="volume_less">Quieter</string>
+    <string name="volume_more">Louder</string>
+    <string name="bright_less">Darker</string>
+    <string name="bright_more">Brighter</string>
+    <string name="env_camera">Camera view</string>
+    <string name="env_virtual">Virtual scene</string>
+    <string name="next_scene">Next scene</string>
+    <string name="dim_less">Dim less</string>
+    <string name="dim_more">Dim more</string>
+    <string name="cinema">Cinema</string>
+    <string name="section_view">Display</string>
+    <string name="section_hands">Hands</string>
+    <string name="section_headset">Headset</string>
+    <string name="section_feedback">Sound and layout</string>
+    <string name="scene">Scene</string>
+    <string name="occlusion">Hands in front</string>
+    <string name="click_style">Click</string>
+    <string name="click_pinch">Pinch</string>
+    <string name="click_poke">Poke (beta)</string>
+    <string name="aim">Aim</string>
+    <string name="aim_head">Look</string>
+    <string name="aim_hand">Hand</string>
+    <string name="which_hand">Use</string>
+    <string name="smoothing">Smoothing</string>
+    <string name="calibrate">Calibrate pinch</string>
+    <string name="swap_sides">Swap left/right</string>
+    <string name="lens_grid">Lens grid</string>
+    <string name="lens_curve">Lens curve</string>
+    <string name="lens_spacing">Lens spacing</string>
+    <string name="lens_height">Lens height</string>
+    <string name="lens_zoom">Zoom</string>
+    <string name="sounds">Sounds</string>
+    <string name="vibration">Vibration</string>
+    <string name="restore_layout">Keep layout</string>
+    <string name="on">On</string>
+    <string name="off">Off</string>
+    <string name="space">Space</string>
+    <string name="stopwatch">Stopwatch</string>
+    <string name="timer">Timer</string>
+    <string name="calibrate_open">Calibration: show one OPEN hand to the camera</string>
+    <string name="calibrate_pinch">Now PINCH thumb and index and hold</string>
+    <string name="calibrate_done">Calibration saved</string>
+    <string name="calibrate_failed">Calibration failed. Keep the hand in view and try again</string>
+    <string name="skip_step">Skip</string>
+    <string name="start_over">Start over</string>
+    <string name="tutorial_done">Done. Releasing within 2 seconds is a tap. Hold still for 2 seconds for a long press.</string>
+    <string-array name="scenes">
+        <item>Dusk</item>
+        <item>Night</item>
+        <item>Mountains</item>
+        <item>Ocean</item>
+    </string-array>
+    <string-array name="glass_levels">
+        <item>Low</item>
+        <item>Frosted</item>
+        <item>Full</item>
+    </string-array>
+    <string-array name="hand_choices">
+        <item>Both</item>
+        <item>Left</item>
+        <item>Right</item>
+    </string-array>
+    <string-array name="smoothing_levels">
+        <item>Fast</item>
+        <item>Balanced</item>
+        <item>Steady</item>
+    </string-array>
+    <string-array name="tutorial_steps">
+        <item>Pinch the Skip button’s window, anywhere on it, to make your first tap.</item>
+        <item>Pinch inside the list below and move your hand to scroll it.</item>
+        <item>Pinch the bar under a window and move it.</item>
+        <item>Pinch the corner at a window’s lower right and drag to resize.</item>
+        <item>Hold an open hand still: back of the hand shows Home, palm towards your face opens Control Center.</item>
+    </string-array>
 </resources>

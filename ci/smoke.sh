@@ -34,11 +34,25 @@ adb exec-out screencap -p > smoke/spatial-home.png
 # The physical panel in landscape. The app's own virtual displays must not be picked up.
 read -r A B < <(adb shell wm size | grep -m1 'Physical size' | grep -o '[0-9]*x[0-9]*' | sed 's/x/ /')
 W=$((A > B ? A : B)); H=$((A > B ? B : A))
-echo "Tapping on a ${W}x${H} panel"
-adb shell input swipe $((W / 2)) $((H * 47 / 100)) $((W / 2)) $((H * 47 / 100)) 200
-wait_for "Spatial surface nexus-2 ready" 20
-sleep 6
+echo "Pressing on a ${W}x${H} panel"
+press() { adb shell input swipe $((W / 2)) $((H / 2)) $((W / 2)) $((H / 2)) "$1"; }
+# A 4 second hold is a long press and must not click.
+press 4000
+wait_for "long press on" 20
+sleep 3
+if adb logcat -d -s NexusXR | grep -q "open CALCULATOR"; then echo "FAIL: a long hold clicked"; fail=1; else echo "PASS: long hold did not click"; fi
+# 1.2 seconds is past Android's own long-press time but under 2 seconds, so it is a tap.
+press 1200
+wait_for "open CALCULATOR" 20
+sleep 8
 adb exec-out screencap -p > smoke/spatial-after-tap.png
+# Screens of other windows, for review.
+for apps in CENTER SETTINGS; do
+  adb shell am force-stop $PKG
+  adb shell am start -W -n $PKG/.xr.XrActivity --es open $apps
+  sleep 25
+  adb exec-out screencap -p > smoke/app-$(echo $apps | tr 'A-Z' 'a-z').png
+done
 adb shell am force-stop $PKG
 adb shell am start -W -n $PKG/.xr.XrActivity --ez headset true
 sleep 25

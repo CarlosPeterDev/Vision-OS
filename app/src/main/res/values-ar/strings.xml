@@ -55,7 +55,7 @@
     <string name="camera_failed">الكاميرا وقفت (%1$s). العرض اتخفى للأمان.</string>
     <string name="start_spatial">▶ ابدأ الوضع المكاني (ماسك الموبايل)</string>
     <string name="start_headset">وضع النضارة (تجريبي)</string>
-    <string name="gesture_help">ورّي إيدك للكاميرا الخلفية. اقرص بالإبهام والسبابة للضغط. اقرص وحرك للتمرير. اقرص عنوان النافذة لتحريكها والركن لتغيير حجمها، وبإيدين تكبرها. ارفع كفك مفتوح شوية لإظهار أو إخفاء الرئيسية.</string>
+    <string name="gesture_help">اعرض إيدك للكاميرا الخلفية. ضم الإبهام والسبابة وسيب علشان تضغط، واثبت ثانيتين للضغطة الطويلة. ضم وحرك علشان تعمل scroll. الشريط تحت النافذة يحركها والركن يغير حجمها. كف مفتوح: الرئيسية. الكف ناحية وشك: مركز التحكم.</string>
     <string name="headset_warning">استخدمه وأنت قاعد وثابت وفي مكان فاضي فقط. العينين بتشوف نفس الكاميرا الواحدة، فمفيش عمق حقيقي. ممنوع المشي أو السواقة أو الرياضة. وقف لو حسيت بتعب. محتاج نضارة موبايل تسيب الكاميرا الخلفية مكشوفة. تصحيح العدسات غير معاير.</string>
     <string name="headset_accept">أنا قاعد</string>
     <string name="app_home">الرئيسية</string>
@@ -97,4 +97,89 @@
     <string name="ctl_rotate_camera">لف الكاميرا 90°</string>
     <string name="ctl_lens_less">العدسة −</string>
     <string name="ctl_lens_more">العدسة +</string>
+    <string name="app_center">مركز التحكم</string>
+    <string name="app_tutorial">التدريب</string>
+    <string name="app_photos">الصور</string>
+    <string name="app_files">الملفات</string>
+    <string name="app_camera">التصوير</string>
+    <string name="app_launcher">تطبيقاتي</string>
+    <string name="net_offline">غير متصل</string>
+    <string name="net_wifi">واي فاي</string>
+    <string name="net_mobile">بيانات الموبايل</string>
+    <string name="net_other">متصل</string>
+    <string name="battery">البطارية %1$d%%</string>
+    <string name="volume_less">صوت أقل</string>
+    <string name="volume_more">صوت أعلى</string>
+    <string name="bright_less">إضاءة أقل</string>
+    <string name="bright_more">إضاءة أعلى</string>
+    <string name="env_camera">عرض الكاميرا</string>
+    <string name="env_virtual">مشهد افتراضي</string>
+    <string name="next_scene">المشهد التالي</string>
+    <string name="dim_less">تعتيم أقل</string>
+    <string name="dim_more">تعتيم أكثر</string>
+    <string name="cinema">سينما</string>
+    <string name="section_view">العرض</string>
+    <string name="section_hands">اليدان</string>
+    <string name="section_headset">النضارة</string>
+    <string name="section_feedback">الصوت والترتيب</string>
+    <string name="scene">المشهد</string>
+    <string name="occlusion">اليد أمام النوافذ</string>
+    <string name="click_style">الضغط</string>
+    <string name="click_pinch">ضم الأصابع</string>
+    <string name="click_poke">لمس مباشر (تجريبي)</string>
+    <string name="aim">التوجيه</string>
+    <string name="aim_head">بالنظر (الرأس)</string>
+    <string name="aim_hand">باليد</string>
+    <string name="which_hand">استخدم</string>
+    <string name="smoothing">التنعيم</string>
+    <string name="calibrate">معايرة الضم</string>
+    <string name="swap_sides">تبديل اليمين والشمال</string>
+    <string name="lens_grid">شبكة العدسات</string>
+    <string name="lens_curve">انحناء العدسة</string>
+    <string name="lens_spacing">المسافة بين العدستين</string>
+    <string name="lens_height">ارتفاع العدسة</string>
+    <string name="lens_zoom">التكبير</string>
+    <string name="sounds">الأصوات</string>
+    <string name="vibration">الاهتزاز</string>
+    <string name="restore_layout">حفظ الترتيب</string>
+    <string name="on">مفعل</string>
+    <string name="off">متوقف</string>
+    <string name="space">مسافة</string>
+    <string name="stopwatch">ساعة إيقاف</string>
+    <string name="timer">المؤقت</string>
+    <string name="calibrate_open">المعايرة: اعرض كف يد مفتوح للكاميرا</string>
+    <string name="calibrate_pinch">دلوقتي ضم الإبهام والسبابة واثبت</string>
+    <string name="calibrate_done">تم حفظ المعايرة</string>
+    <string name="calibrate_failed">المعايرة فشلت. خلي إيدك ظاهرة وحاول تاني</string>
+    <string name="skip_step">تخطي</string>
+    <string name="start_over">من الأول</string>
+    <string name="tutorial_done">خلصت. لو سيبت قبل ثانيتين تبقى ضغطة عادية. اثبت ثانيتين للضغطة الطويلة.</string>
+    <string-array name="scenes">
+        <item>غروب</item>
+        <item>ليل</item>
+        <item>جبال</item>
+        <item>بحر</item>
+    </string-array>
+    <string-array name="glass_levels">
+        <item>خفيف</item>
+        <item>مصنفر</item>
+        <item>كامل</item>
+    </string-array>
+    <string-array name="hand_choices">
+        <item>الاتنين</item>
+        <item>الشمال</item>
+        <item>اليمين</item>
+    </string-array>
+    <string-array name="smoothing_levels">
+        <item>سريع</item>
+        <item>متوازن</item>
+        <item>ثابت</item>
+    </string-array>
+    <string-array name="tutorial_steps">
+        <item>اضم أصابعك على أي مكان في النافذة دي علشان تعمل أول ضغطة.</item>
+        <item>اضم جوه القائمة اللي تحت وحرك إيدك علشان تعمل scroll.</item>
+        <item>اضم على الشريط اللي تحت النافذة وحركها.</item>
+        <item>اضم على الركن اللي تحت على اليمين واسحب علشان تغير الحجم.</item>
+        <item>ثبت كف مفتوح: ظهر الإيد يفتح الرئيسية، وكف الإيد ناحية وشك يفتح مركز التحكم.</item>
+    </string-array>
 </resources>

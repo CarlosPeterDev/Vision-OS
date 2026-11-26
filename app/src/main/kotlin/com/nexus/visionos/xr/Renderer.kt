@@ -13,6 +13,7 @@ import android.opengl.Matrix
 import android.util.Log
 import android.view.Surface
 import androidx.camera.core.SurfaceRequest
+import com.nexus.visionos.R
 import com.nexus.xr.*
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -23,7 +24,7 @@ import javax.microedition.khronos.opengles.GL10
 import kotlin.math.max
 import kotlin.math.tan
 
-class CursorMark(val position: Vec3, val pinched: Boolean)
+class CursorMark(val position: Vec3, val pinched: Boolean, val progress: Float = 0f)
 
 /** Immutable description of one frame, built on the main thread. */
 class Scene(
@@ -41,7 +42,21 @@ class Scene(
     val cameraTurns: Int = 0,
     val displayDegrees: Int = 90,
     val cameraFov: Float = 50f,
-    val blank: Boolean = false
+    val blank: Boolean = false,
+    /** Fade per window id; missing means opaque. */
+    val alphas: Map<Int, Float> = emptyMap(),
+    /** Window controls being aimed at. */
+    val highlights: Set<Pair<Int, Region>> = emptySet(),
+    val environment: Int = 0,
+    val dim: Float = 0f,
+    /** Redraw the camera pixels of the hands over the windows. */
+    val occlusion: Boolean = false,
+    /** Hands used for occlusion, present even when outlines are hidden. */
+    val handShapes: List<List<Point>> = emptyList(),
+    val lensShift: Float = 0f,
+    val lensHeight: Float = 0f,
+    val lensZoom: Float = 1f,
+    val lensGrid: Boolean = false
 )
 
 /** Vertical field of view of one eye viewport after centre-cropping the 4:3 passthrough. */
@@ -76,7 +91,7 @@ class XrRenderer(
     }
 
     private class WindowSlot(val width: Int, val height: Int, val onSurface: (Surface) -> Unit) { var external: External? = null }
-    private class Title(val key: String, val texture: Int)
+    private class Title(val key: String, val texture: Int, val width: Int)
     private class Target(val fbo: Int, val texture: Int, val width: Int, val height: Int)
 
     // All fields below are used on the GL thread only.
@@ -88,7 +103,7 @@ class XrRenderer(
     private var pendingCamera: SurfaceRequest? = null
     private var width = 1
     private var height = 1
-    private var handle = 0
+    private val icons = HashMap<Int, Int>()
     private var blurA: Target? = null
     private var blurB: Target? = null
     private var eye: Target? = null
@@ -105,9 +120,11 @@ class XrRenderer(
     private lateinit var flatProgram: Program
     private lateinit var ringProgram: Program
     private lateinit var lensProgram: Program
+    private lateinit var shadowProgram: Program
 
     private val viewProjection = FloatArray(16)
-    private val quad = floats(20)
+    private val quad = floats((SEGMENTS + 1) * 2 * 5)
+    private val hull = floats(4096)
     private val lines = floats(2 * 2 * 32)
 
     private val glExecutor = Executor { view.queueEvent(it) }
@@ -134,6 +151,7 @@ class XrRenderer(
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         // A new context: every old GL object is already gone.
         titles.clear()
+        icons.clear()
         blurA = null; blurB = null; eye = null
         camera = null
         cameraRequest?.invalidate()
@@ -147,11 +165,7 @@ class XrRenderer(
         flatProgram = Program(Shaders.FLAT_VERTEX, Shaders.FLAT)
         ringProgram = Program(Shaders.WORLD_VERTEX, Shaders.RING)
         lensProgram = Program(Shaders.SCREEN_VERTEX, Shaders.LENS)
-        handle = textTexture(64, 64) { canvas, paint ->
-            paint.strokeWidth = 8f
-            canvas.drawLine(58f, 18f, 58f, 54f, paint)
-            canvas.drawLine(58f, 54f, 22f, 54f, paint)
-        }
+        shadowProgram = Program(Shaders.WORLD_VERTEX, Shaders.SHADOW)
         ready = true
         slots.values.forEach(::attach)
         pendingCamera?.let(::bindCamera)
@@ -239,6 +253,9 @@ class XrRenderer(
                 lensProgram.texture("uTexture", buffer.texture, GL_TEXTURE_2D, 0)
                 lensProgram.set("uK", s.distortion)
                 lensProgram.set("uAspect", aspect)
+                lensProgram.set("uCentre", if (side == 0) s.lensShift else -s.lensShift, s.lensHeight)
+                lensProgram.set("uZoom", s.lensZoom)
+                lensProgram.set("uGrid", if (s.lensGrid) 1 else 0)
                 fullScreen(lensProgram)
             }
         }
@@ -259,20 +276,33 @@ class XrRenderer(
         glDisable(GL_BLEND)
         val cam = camera
         if (s.passthrough && cam?.hasFrame == true) {
-            cameraProgram.use()
-            cameraProgram.texture("uTexture", cam.texture, GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0)
-            cameraProgram.matrix("uTransform", cam.matrix)
-            val crop = if (aspect > 4f / 3f) floatArrayOf(1f, (4f / 3f) / aspect) else floatArrayOf(aspect / (4f / 3f), 1f)
-            cameraProgram.set("uCrop", crop[0], crop[1])
-            cameraProgram.set("uTurns", (((s.displayDegrees / 90) + s.cameraTurns) % 4))
+            bindCameraProgram(cam, s, aspect)
             fullScreen(cameraProgram)
         } else {
             skyProgram.use()
             val t = tan(Math.toRadians(viewFov(s, aspect) / 2.0)).toFloat()
             skyProgram.set("uTan", t * aspect, t)
             skyProgram.set("uHead", q.x, q.y, q.z, q.w)
+            skyProgram.set("uScene", s.environment)
             fullScreen(skyProgram)
         }
+        if (s.dim > 0.01f) {
+            glEnable(GL_BLEND)
+            glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
+            flatProgram.use()
+            flatProgram.set("uColor", 0f, 0f, 0f, s.dim)
+            fullScreen(flatProgram)
+            glDisable(GL_BLEND)
+        }
+    }
+
+    private fun bindCameraProgram(cam: External, s: Scene, aspect: Float) {
+        cameraProgram.use()
+        cameraProgram.texture("uTexture", cam.texture, GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0)
+        cameraProgram.matrix("uTransform", cam.matrix)
+        val crop = if (aspect > 4f / 3f) floatArrayOf(1f, (4f / 3f) / aspect) else floatArrayOf(aspect / (4f / 3f), 1f)
+        cameraProgram.set("uCrop", crop[0], crop[1])
+        cameraProgram.set("uTurns", (((s.displayDegrees / 90) + s.cameraTurns) % 4))
     }
 
     /** One shared, downsampled and blurred copy of the background serves every glass window. */
@@ -323,35 +353,11 @@ class XrRenderer(
 
         glEnable(GL_BLEND)
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA) // premultiplied alpha everywhere
-        val bar = SpatialWindow.BAR
         // Far to near; the list order (focus) breaks ties.
-        for (win in s.windows.sortedByDescending { it.distance }) {
-            val halfW = win.w / 2
-            val halfH = win.h / 2
+        for (win in s.windows.sortedByDescending { it.distance }) drawWindow(s, win, w, h, blurred)
 
-            glassProgram.use()
-            glassProgram.texture("uBlur", blurred, GL_TEXTURE_2D, 0)
-            glassProgram.set("uViewport", w.toFloat(), h.toFloat())
-            glassProgram.set("uSize", win.w + 0.03f, win.h + bar + 0.03f)
-            glassProgram.set("uQuality", s.quality)
-            glassProgram.set("uFocus", if (win.id == s.focusedId) 1f else 0f)
-            drawQuad(glassProgram, win, -halfW - 0.015f, -halfH - 0.015f, halfW + 0.015f, halfH + bar + 0.015f)
-
-            slots[win.id]?.external?.takeIf { it.hasFrame }?.let { content ->
-                contentProgram.use()
-                contentProgram.texture("uTexture", content.texture, GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0)
-                contentProgram.matrix("uTransform", content.matrix)
-                contentProgram.set("uSize", win.w, win.h)
-                drawQuad(contentProgram, win, -halfW, -halfH, halfW, halfH)
-            }
-
-            textureProgram.use()
-            textureProgram.texture("uTexture", titleTexture(win, s.titles[win.id].orEmpty()), GL_TEXTURE_2D, 0)
-            drawQuad(textureProgram, win, -halfW, halfH, halfW, halfH + bar)
-            textureProgram.texture("uTexture", handle, GL_TEXTURE_2D, 0)
-            drawQuad(textureProgram, win, halfW - bar, -halfH - bar, halfW, -halfH)
-        }
-
+        if (s.occlusion && s.passthrough && camera?.hasFrame == true) drawHandOcclusion(s, aspect)
+        glEnable(GL_BLEND)
         drawHands(s)
 
         for (cursor in s.cursors) {
@@ -359,12 +365,133 @@ class XrRenderer(
             val p = cursor.position
             val right = q.rotate(Vec3(1f, 0f, 0f))
             val up = q.rotate(Vec3(0f, 1f, 0f))
-            val size = p.length * if (cursor.pinched) 0.014f else 0.022f
+            val size = p.length * if (cursor.pinched) 0.017f else 0.024f
             ringProgram.use()
             ringProgram.set("uFill", if (cursor.pinched) 1f else 0f)
+            ringProgram.set("uProgress", cursor.progress)
             putQuad(p - right * size - up * size, p + right * size - up * size, p - right * size + up * size, p + right * size + up * size)
             submitQuad(ringProgram)
         }
+    }
+
+    private fun glass(s: Scene, blurred: Int, viewportW: Int, viewportH: Int, width: Float, height: Float, radius: Float, focus: Float, alpha: Float) {
+        glassProgram.use()
+        glassProgram.texture("uBlur", blurred, GL_TEXTURE_2D, 0)
+        glassProgram.set("uViewport", viewportW.toFloat(), viewportH.toFloat())
+        glassProgram.set("uSize", width, height)
+        glassProgram.set("uRadius", radius)
+        glassProgram.set("uQuality", s.quality)
+        glassProgram.set("uFocus", focus)
+        glassProgram.set("uAlpha", alpha)
+    }
+
+    private fun drawWindow(s: Scene, win: SpatialWindow, viewportW: Int, viewportH: Int, blurred: Int) {
+        val alpha = s.alphas[win.id] ?: 1f
+        val halfW = win.w / 2
+        val halfH = win.h / 2
+        val rim = 0.012f
+        val panelTop = halfH + SpatialWindow.BAR
+        val panelW = win.w + rim * 2
+        val panelH = panelTop + halfH + rim * 2
+
+        if (s.quality > 0) {
+            val m = 0.07f
+            shadowProgram.use()
+            shadowProgram.set("uSize", panelW + m * 2, panelH + m * 2)
+            shadowProgram.set("uMargin", m)
+            shadowProgram.set("uAlpha", alpha)
+            drawQuad(shadowProgram, win, -halfW - rim - m, -halfH - rim - m - 0.025f, halfW + rim + m, panelTop + rim + m - 0.025f)
+        }
+
+        glass(s, blurred, viewportW, viewportH, panelW, panelH, 0.062f, if (win.id == s.focusedId) 0.55f else 0f, alpha)
+        drawQuad(glassProgram, win, -halfW - rim, -halfH - rim, halfW + rim, panelTop + rim)
+
+        slots[win.id]?.external?.takeIf { it.hasFrame }?.let { content ->
+            contentProgram.use()
+            contentProgram.texture("uTexture", content.texture, GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0)
+            contentProgram.matrix("uTransform", content.matrix)
+            contentProgram.set("uSize", win.w, win.h)
+            contentProgram.set("uAlpha", alpha)
+            drawQuad(contentProgram, win, -halfW, -halfH, halfW, halfH)
+        }
+
+        val title = title(win, s.titles[win.id].orEmpty())
+        val titleHalf = (title.width / 640f / 2).coerceAtMost(halfW)
+        textureProgram.use()
+        textureProgram.texture("uTexture", title.texture, GL_TEXTURE_2D, 0)
+        textureProgram.set("uAlpha", alpha)
+        drawQuad(textureProgram, win, -titleHalf, halfH, titleHalf, panelTop)
+
+        // Separate glass buttons under the window, each with its own space.
+        for (control in controlLayout(win)) {
+            val aimed = (win.id to control.region) in s.highlights
+            val grow = if (aimed) 1.16f else 1f
+            val hw = control.halfWidth * grow
+            var hh = control.halfHeight * grow
+            val icon = when (control.region) {
+                Region.CLOSE -> R.drawable.ic_ui_close
+                Region.MINIMIZE -> R.drawable.ic_ui_minimize
+                Region.FARTHER -> R.drawable.ic_ui_farther
+                Region.NEARER -> R.drawable.ic_ui_nearer
+                Region.RESIZE -> R.drawable.ic_ui_resize
+                else -> 0
+            }
+            if (control.region == Region.GRAB) hh = 0.013f * grow
+            if (control.region != Region.RESIZE) {
+                glass(s, blurred, viewportW, viewportH, hw * 2, hh * 2, minOf(hw, hh), if (aimed) 1f else 0.12f, alpha)
+                drawQuad(glassProgram, win, control.x - hw, control.y - hh, control.x + hw, control.y + hh)
+            }
+            if (icon != 0) {
+                val half = minOf(hw, hh) * if (control.region == Region.RESIZE) 1.15f else 0.62f
+                textureProgram.use()
+                textureProgram.texture("uTexture", icon(icon), GL_TEXTURE_2D, 0)
+                textureProgram.set("uAlpha", if (control.region == Region.RESIZE && !aimed) alpha * 0.7f else alpha)
+                drawQuad(textureProgram, win, control.x - half, control.y - half, control.x + half, control.y + half)
+            }
+        }
+    }
+
+    /**
+     * Draws the camera image again inside a rough outline of each hand, so hands appear in front
+     * of the windows. The outline comes from the landmarks, so its edges are approximate.
+     */
+    private fun drawHandOcclusion(s: Scene, aspect: Float) {
+        hull.clear()
+        var count = 0
+        fun vertex(x: Float, y: Float) {
+            if (hull.remaining() >= 2) { hull.put(x / aspect * 2 - 1).put(1 - y * 2); count++ }
+        }
+        for (hand in s.handShapes) {
+            if (hand.size < 21) continue
+            // Work in square units, where one unit is the viewport height.
+            fun x(i: Int) = hand[i].x * aspect
+            fun y(i: Int) = hand[i].y
+            val palm = maxOf(kotlin.math.hypot(x(0) - x(9), y(0) - y(9)), kotlin.math.hypot(x(5) - x(17), y(5) - y(17)))
+            val radius = palm * 0.17f
+            for ((a, b) in BONES) {
+                val dx = x(b) - x(a)
+                val dy = y(b) - y(a)
+                val length = kotlin.math.hypot(dx, dy)
+                if (length < 1e-5f) continue
+                val nx = -dy / length * radius
+                val ny = dx / length * radius
+                val ex = dx / length * radius * 0.7f
+                val ey = dy / length * radius * 0.7f
+                vertex(x(a) + nx - ex, y(a) + ny - ey); vertex(x(a) - nx - ex, y(a) - ny - ey); vertex(x(b) + nx + ex, y(b) + ny + ey)
+                vertex(x(b) + nx + ex, y(b) + ny + ey); vertex(x(a) - nx - ex, y(a) - ny - ey); vertex(x(b) - nx + ex, y(b) - ny + ey)
+            }
+            for ((a, b, c) in PALM) { vertex(x(a), y(a)); vertex(x(b), y(b)); vertex(x(c), y(c)) }
+        }
+        if (count == 0) return
+        val cam = camera ?: return
+        glDisable(GL_BLEND)
+        bindCameraProgram(cam, s, aspect)
+        hull.flip()
+        val position = cameraProgram.attribute("aPosition")
+        glVertexAttribPointer(position, 2, GL_FLOAT, false, 0, hull)
+        glEnableVertexAttribArray(position)
+        glDrawArrays(GL_TRIANGLES, 0, count)
+        glDisableVertexAttribArray(position)
     }
 
     private fun drawHands(s: Scene) {
@@ -385,19 +512,30 @@ class XrRenderer(
         }
     }
 
+    /** A rectangle in window coordinates; curved windows are split into a strip that follows the arc. */
     private fun drawQuad(program: Program, win: SpatialWindow, left: Float, bottom: Float, right: Float, top: Float) {
-        putQuad(win.point(left, bottom), win.point(right, bottom), win.point(left, top), win.point(right, top))
-        submitQuad(program)
+        val segments = if (win.curved) SEGMENTS else 1
+        quad.clear()
+        for (i in 0..segments) {
+            val u = i.toFloat() / segments
+            val x = left + (right - left) * u
+            for ((y, v) in listOf(bottom to 0f, top to 1f)) {
+                val p = win.point(x, y)
+                quad.put(p.x).put(p.y).put(p.z).put(u).put(v)
+            }
+        }
+        submit(program, (segments + 1) * 2)
     }
 
     private fun putQuad(bl: Vec3, br: Vec3, tl: Vec3, tr: Vec3) {
         quad.clear()
         val uv = floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f)
         listOf(bl, br, tl, tr).forEachIndexed { i, p -> quad.put(p.x).put(p.y).put(p.z).put(uv[i * 2]).put(uv[i * 2 + 1]) }
-        quad.position(0)
     }
 
-    private fun submitQuad(program: Program) {
+    private fun submitQuad(program: Program) = submit(program, 4)
+
+    private fun submit(program: Program, vertices: Int) {
         program.matrix("uViewProjection", viewProjection)
         val position = program.attribute("aPosition")
         val uv = program.attribute("aUv")
@@ -407,9 +545,10 @@ class XrRenderer(
         quad.position(3)
         glVertexAttribPointer(uv, 2, GL_FLOAT, false, 20, quad)
         glEnableVertexAttribArray(uv)
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, vertices)
         glDisableVertexAttribArray(position)
         glDisableVertexAttribArray(uv)
+        quad.position(0)
     }
 
     private val screen = floats(8).apply { put(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)); position(0) }
@@ -422,32 +561,31 @@ class XrRenderer(
         glDisableVertexAttribArray(position)
     }
 
-    private fun titleTexture(win: SpatialWindow, title: String): Int {
-        val w = (win.w * 640).toInt().coerceIn(256, 1600)
-        val key = "$title:${w / 8}"
+    private fun title(win: SpatialWindow, text: String): Title {
+        val h = (SpatialWindow.BAR * 640).toInt()
+        val room = (win.w * 640).toInt().coerceAtLeast(64)
+        val key = "$text:${room / 8}"
         titles[win.id]?.let {
-            if (it.key == key) return it.texture
+            if (it.key == key) return it
             glDeleteTextures(1, intArrayOf(it.texture), 0)
         }
-        val h = (SpatialWindow.BAR * 640).toInt()
+        val measure = Paint().apply { textSize = h * 0.52f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) }
+        val w = (measure.measureText(text).toInt() + h).coerceIn(64, room)
         val texture = textTexture(w, h) { canvas, paint ->
-            paint.textSize = h * 0.55f
-            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            // Shrink long titles so narrow windows do not draw them under the buttons.
-            val baseSize = paint.textSize
-            val room = w - h * 4.6f
-            val length = paint.measureText(title)
-            if (length > room) paint.textSize = baseSize * (room / length).coerceAtLeast(0.1f)
-            canvas.drawText(title, h * 0.4f, h * 0.7f, paint)
-            paint.textSize = baseSize
+            paint.textSize = h * 0.52f
+            paint.typeface = measure.typeface
             paint.textAlign = Paint.Align.CENTER
-            // Same order as hitTest: close, minimize, farther, nearer, from the right.
-            listOf("✕", "⌄", "−", "+").forEachIndexed { i, glyph ->
-                canvas.drawText(glyph, w - h * (i + 0.5f), h * 0.7f, paint)
-            }
+            val length = paint.measureText(text)
+            if (length > w - h * 0.4f) paint.textSize *= (w - h * 0.4f) / length
+            canvas.drawText(text, w / 2f, h * 0.7f, paint)
         }
-        titles[win.id] = Title(key, texture)
-        return texture
+        return Title(key, texture, w).also { titles[win.id] = it }
+    }
+
+    private fun icon(resource: Int) = icons.getOrPut(resource) {
+        textTexture(96, 96) { canvas, _ ->
+            view.context.getDrawable(resource)?.apply { setBounds(0, 0, 96, 96); draw(canvas) }
+        }
     }
 
     private fun textTexture(w: Int, h: Int, draw: (Canvas, Paint) -> Unit): Int {
@@ -492,6 +630,8 @@ class XrRenderer(
     private fun floats(count: Int) = ByteBuffer.allocateDirect(count * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
 
     private companion object {
+        const val SEGMENTS = 24
+        val PALM = listOf(Triple(0, 1, 5), Triple(0, 5, 9), Triple(0, 9, 13), Triple(0, 13, 17), Triple(1, 2, 5))
         val BONES = listOf(
             0 to 1, 1 to 2, 2 to 3, 3 to 4, 0 to 5, 5 to 6, 6 to 7, 7 to 8, 5 to 9, 9 to 10, 10 to 11, 11 to 12,
             9 to 13, 13 to 14, 14 to 15, 15 to 16, 13 to 17, 17 to 18, 18 to 19, 19 to 20, 0 to 17

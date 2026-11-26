@@ -7,6 +7,13 @@ enum class TouchAction { DOWN, MOVE, UP, CANCEL }
 interface InteractionListener {
     fun onContentTouch(windowId: Int, action: TouchAction, u: Float, v: Float)
     fun onClosed(windowId: Int)
+    /** A free pointer is over a window's content. */
+    fun onContentHover(windowId: Int, u: Float, v: Float) {}
+    fun onHoverEnd(windowId: Int) {}
+    /** Something was pressed: content, a control or a drag handle. */
+    fun onPressed(region: Region) {}
+    /** A drag or resize that really changed the window was released. */
+    fun onAdjusted(region: Region) {}
 }
 
 /**
@@ -16,7 +23,9 @@ interface InteractionListener {
 class InteractionController(private val windows: WindowManager, private val listener: InteractionListener) {
     private sealed interface Capture { val windowId: Int }
     private data class Content(override val windowId: Int, var u: Float, var v: Float) : Capture
-    private data class Drag(override val windowId: Int, val yawOffset: Float, val pitchOffset: Float) : Capture
+    private data class Drag(
+        override val windowId: Int, val yawOffset: Float, val pitchOffset: Float, val startYaw: Float, val startPitch: Float
+    ) : Capture
     private data class Resize(override val windowId: Int, val startRadius: Float, val startScale: Float) : Capture
     private data class Button(override val windowId: Int, val region: Region) : Capture
     private data class TwoHand(override val windowId: Int, val startSeparation: Float, val startScale: Float) : Capture
@@ -24,16 +33,29 @@ class InteractionController(private val windows: WindowManager, private val list
     private val captures = mutableMapOf<Int, Capture>()
     private val rays = mutableMapOf<Int, Ray>()
 
+    private val hovers = mutableMapOf<Int, Hit>()
+
     fun isCapturing(pointer: Int) = pointer in captures
+
+    /** What each free pointer is aiming at, for highlighting. */
+    fun hovered(): Collection<Hit> = hovers.values
+
+    private fun hover(pointer: Int, hit: Hit?) {
+        val previous = if (hit == null) hovers.remove(pointer) else hovers.put(pointer, hit)
+        val leftContent = previous?.region == Region.CONTENT &&
+            (hit?.region != Region.CONTENT || hit.windowId != previous.windowId)
+        if (leftContent) listener.onHoverEnd(previous!!.windowId)
+        if (hit?.region == Region.CONTENT) listener.onContentHover(hit.windowId, hit.u, hit.v)
+    }
 
     fun handle(pointer: Int, phase: PointerPhase, ray: Ray) {
         rays[pointer] = ray
         when (phase) {
-            PointerPhase.HOVER -> {}
-            PointerPhase.DOWN -> down(pointer, ray)
+            PointerPhase.HOVER -> if (pointer !in captures) hover(pointer, windows.pick(ray))
+            PointerPhase.DOWN -> { hover(pointer, null); down(pointer, ray) }
             PointerPhase.MOVE -> move(pointer, ray)
             PointerPhase.UP -> release(pointer, ray, cancelled = false)
-            PointerPhase.CANCEL -> release(pointer, ray, cancelled = true)
+            PointerPhase.CANCEL -> { hover(pointer, null); release(pointer, ray, cancelled = true) }
         }
     }
 
@@ -54,12 +76,13 @@ class InteractionController(private val windows: WindowManager, private val list
         if (captures.values.any { it.windowId == hit.windowId }) return
         windows.focus(hit.windowId)
         val win = windows.get(hit.windowId) ?: return
+        listener.onPressed(hit.region)
         captures[pointer] = when (hit.region) {
             Region.CONTENT -> {
                 listener.onContentTouch(win.id, TouchAction.DOWN, hit.u, hit.v)
                 Content(win.id, hit.u, hit.v)
             }
-            Region.TITLE -> Drag(win.id, wrap(win.yaw - yaw(ray)), win.pitch - pitch(ray))
+            Region.TITLE, Region.GRAB -> Drag(win.id, wrap(win.yaw - yaw(ray)), win.pitch - pitch(ray), win.yaw, win.pitch)
             Region.RESIZE -> Resize(win.id, radius(ray, win).coerceAtLeast(0.05f), win.scale)
             else -> Button(win.id, hit.region)
         }
@@ -105,9 +128,18 @@ class InteractionController(private val windows: WindowManager, private val list
                 val hit = windows.pick(ray)
                 if (!cancelled && hit?.windowId == capture.windowId && hit.region == capture.region) press(capture)
             }
-            else -> {}
+            is Drag -> windows.get(capture.windowId)?.let {
+                if (!cancelled && abs(wrap(it.yaw - capture.startYaw)) + abs(it.pitch - capture.startPitch) > 0.08f)
+                    listener.onAdjusted(Region.GRAB)
+            }
+            is Resize -> windows.get(capture.windowId)?.let {
+                if (!cancelled && abs(it.scale - capture.startScale) > 0.08f) listener.onAdjusted(Region.RESIZE)
+            }
         }
     }
+
+    /** The window a held pointer is working on. */
+    fun capturedWindow(pointer: Int): Int? = captures[pointer]?.windowId
 
     private fun press(button: Button) {
         val win = windows.get(button.windowId) ?: return
@@ -120,7 +152,11 @@ class InteractionController(private val windows: WindowManager, private val list
         }
     }
 
+    /** Forgets pointers that are gone, so no highlight stays behind. */
+    fun retainHovers(alive: Set<Int>) = hovers.keys.filter { it !in alive }.forEach { hover(it, null) }
+
     fun cancelAll() {
+        retainHovers(emptySet())
         captures.keys.toList().forEach { release(it, rays[it] ?: Ray(Vec3(0f, 0f, 0f), Vec3(0f, 0f, -1f)), true) }
     }
 

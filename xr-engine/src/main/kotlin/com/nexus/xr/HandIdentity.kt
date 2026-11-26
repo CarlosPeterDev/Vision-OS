@@ -6,10 +6,10 @@ import kotlin.math.hypot
 class HandIdentity(private val maxJump: Float = 0.3f) {
     private var previous = emptyMap<Int, Point>()
 
-    fun assign(hands: List<List<Point>>): List<Hand> {
+    fun assign(hands: List<List<Point>>, sides: List<Side> = emptyList()): List<Hand> {
         val free = previous.toMutableMap()
         val used = mutableSetOf<Int>()
-        val result = hands.map { points ->
+        val result = hands.mapIndexed { index, points ->
             val wrist = points[0]
             val match = free.minByOrNull { hypot(it.value.x - wrist.x, it.value.y - wrist.y) }
                 ?.takeIf { hypot(it.value.x - wrist.x, it.value.y - wrist.y) <= maxJump }?.key
@@ -17,7 +17,7 @@ class HandIdentity(private val maxJump: Float = 0.3f) {
             // Two slots are enough for two hands; avoid ids of hands that may return shortly.
             val id = match ?: generateSequence(0) { it + 1 }.first { it !in used && it !in previous }
             used += id
-            Hand(id, points)
+            Hand(id, points, sides.getOrElse(index) { Side.UNKNOWN })
         }
         previous = result.associate { it.id to it.points[0] }
         return result
