@@ -51,6 +51,9 @@ class XrSettings(context: Context) {
     var haptics by Bool(true)
     var restoreLayout by Bool(true)
     var tutorialSeen by Bool(false)
+    var folder: String
+        get() = prefs.getString("folder", "") ?: ""
+        set(v) = prefs.edit().putString("folder", v).apply()
     var layout: String
         get() = prefs.getString("layout", "") ?: ""
         set(v) = prefs.edit().putString("layout", v).apply()

@@ -5,6 +5,7 @@ import com.nexus.voice.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
 
 /** Wires the voice engine to Android. Shared by the start screen and the spatial assistant. */
 class VoiceStack(context: Context, scope: CoroutineScope, onFallback: (String, VoiceException) -> Unit) {
@@ -19,10 +20,13 @@ class VoiceStack(context: Context, scope: CoroutineScope, onFallback: (String, V
     private val mic = MicSource()
     private val systemTts = SystemTts(context)
     val engine: VoiceEngine
+    val stt: SttProvider
+    /** Returns a spoken answer for sentences the app handles itself, or null to ask the AI model. */
+    var interceptor: ((String) -> String?)? = null
 
     init {
         val cloudEnabled = { settings.cloudVoice && secrets.has(SecretStore.ELEVENLABS) }
-        val stt = FallbackStt(
+        stt = FallbackStt(
             ScribeStt(OkHttpSockets(client), api, settings::elevenLabs, mic, usage), SystemStt(context.applicationContext),
             sttHealth, cloudEnabled
         ) { onFallback("STT", it) }
@@ -34,7 +38,9 @@ class VoiceStack(context: Context, scope: CoroutineScope, onFallback: (String, V
         val llm = LlmClient(client, settings, secrets) { context.getString(R.string.echo_prefix) }
         val interrupt: (() -> Flow<Unit>)? =
             if (MicSource.supportsBargeIn) ({ if (settings.bargeIn) mic.bargeIn() else emptyFlow() }) else null
-        engine = VoiceEngine(scope, stt, tts, interrupt, llm::reply)
+        engine = VoiceEngine(scope, stt, tts, interrupt) { heard ->
+            interceptor?.invoke(heard)?.let { flowOf(it) } ?: llm.reply(heard)
+        }
     }
 
     fun shutdown() {

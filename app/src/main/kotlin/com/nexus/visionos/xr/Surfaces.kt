@@ -240,6 +240,15 @@ class SpatialSurface(
         connection.commitText(text, 1)
     }
 
+    /** Only this app's own ordinary text fields; never passwords or web content. */
+    fun canSuggest(): Boolean {
+        val focused = root?.findFocus() as? android.widget.EditText ?: return false
+        val variation = focused.inputType and android.text.InputType.TYPE_MASK_VARIATION
+        return variation != android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD &&
+            variation != android.text.InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD &&
+            variation != android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+    }
+
     fun textBeforeCursor(): String = input()?.second?.getTextBeforeCursor(40, 0)?.toString().orEmpty()
 
     fun key(code: Int) {

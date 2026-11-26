@@ -347,4 +347,45 @@ class XrTest {
         assertEquals(0.4f, at(PointerPhase.UP, 0.8f).x, 1e-4f)
         assertEquals(0.5f, at(PointerPhase.HOVER, 0.1f).x, 0f)
     }
+
+    @Test fun voiceCommandsInEnglishAndArabic() {
+        val c = VoiceCommands()
+        assertEquals(VoiceCommand.Open(AppType.BROWSER), c.parse("Open the browser, please."))
+        assertEquals(VoiceCommand.Open(AppType.CALCULATOR), c.parse("افتح الآلة الحاسبة"))
+        assertEquals(VoiceCommand.Open(AppType.SETTINGS), c.parse("لو سمحت افتح الإعدادات"))
+        assertEquals(VoiceCommand.Close(AppType.NOTES), c.parse("close notes"))
+        assertEquals(VoiceCommand.Open(AppType.CENTER), c.parse("show control center"))
+        assertNull(c.parse("how do I open the browser on my laptop"))
+        assertNull(c.parse("open the door"))
+    }
+
+    @Test fun destructiveCommandsNeedConfirmation() {
+        val c = VoiceCommands()
+        assertEquals(CommandResult.AskToConfirm(VoiceCommand.CloseAll), c.handle("close all", 0))
+        assertEquals(CommandResult.Run(VoiceCommand.CloseAll), c.handle("Confirm.", 5_000))
+        assertNull(c.handle("confirm", 6_000))
+        c.handle("اقفل الكل", 10_000)
+        assertNull(c.handle("تأكيد", 100_000)) // too late
+        c.handle("exit", 0); assertEquals(CommandResult.Cancelled, c.handle("cancel", 1))
+        c.handle("exit", 0); assertEquals(CommandResult.Run(VoiceCommand.Recenter), c.handle("recenter", 1))
+        assertNull(c.handle("confirm", 2))
+    }
+
+    @Test fun suggestionsLearnAndPersist() {
+        val s = WordSuggester()
+        assertEquals("hello", s.suggest("hel").first())
+        assertEquals("Hello", s.suggest("Hel").first())
+        assertTrue(s.suggest("صبا").contains("صباح"))
+        repeat(3) { s.learn("helicopter") }
+        assertEquals("helicopter", WordSuggester(s.state()).suggest("hel").first())
+        s.learn("a1b2c3"); s.learn("ab")
+        assertFalse(s.state().contains("a1b2"))
+        assertEquals("wor", s.currentWord("hello wor"))
+        assertEquals("", s.currentWord("hello "))
+        assertTrue(s.suggest("").isEmpty())
+        val small = WordSuggester(limit = 2)
+        listOf("alpha", "bravo", "charlie").forEach(small::learn)
+        assertFalse(small.state().contains("alpha"))
+        assertTrue(WordSuggester("garbage\nx\ty").state().isEmpty())
+    }
 }

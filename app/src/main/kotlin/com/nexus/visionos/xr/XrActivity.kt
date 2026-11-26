@@ -3,6 +3,15 @@ package com.nexus.visionos.xr
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
+import androidx.activity.result.PickVisualMediaRequest
+import com.nexus.voice.SttEvent
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.hardware.display.DisplayManager
@@ -12,7 +21,6 @@ import android.net.Uri
 import android.opengl.GLSurfaceView
 import android.os.BatteryManager
 import android.os.Bundle
-import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import android.view.Choreographer
@@ -95,6 +103,26 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         if (it) talk()
     }
     private val videoPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { video = it ?: video }
+    private val photoPicker = registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(60)) {
+        if (it.isNotEmpty()) { photos = it; library++ }
+    }
+    private val folderPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            settings.folder = uri.toString()
+            library++
+        }
+    }
+    private val dictationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        if (it) dictate()
+    }
+    private var photos = emptyList<Uri>()
+    private var library = 0
+    private var dictation: Job? = null
+    private var recording: VideoCapture? = null
+    private lateinit var recordingBadge: TextView
+    private val commands = VoiceCommands()
+    private val io = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     private val audioFocus by lazy {
         AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT).setAudioAttributes(speechAttributes).build()
@@ -124,9 +152,11 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         camera = CameraFeed(this, hands)
         cameraFov = camera.verticalFov()
         voice = VoiceStack(this, lifecycleScope) { feature, e -> voiceNotice = "$feature → Android: ${e.message}" }
+        voice.interceptor = ::onSpeech
 
         gl = GLSurfaceView(this)
         gl.setEGLContextClientVersion(3)
+        gl.setEGLConfigChooser(RecordableConfigChooser())
         gl.preserveEGLContextOnPause = true
         renderer = XrRenderer(gl, head::orientation) { action -> runOnUiThread { if (!isDestroyed) action() } }
         gl.setRenderer(renderer)
@@ -148,14 +178,28 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             setPadding(36, 20, 36, 20)
             visibility = View.GONE
         }
+        recordingBadge = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 15f
+            background = LiquidGlass(0xE0202A, 0xD0, 0xCC)
+            setPadding(32, 14, 32, 14)
+            visibility = View.GONE
+        }
         setContentView(FrameLayout(this).apply {
             addView(gl)
+            addView(recordingBadge, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = 24 })
             addView(hud, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = 24 })
             addView(warning)
         })
         open(AppType.HOME)
         // Optionally opens one more window in front. The activity is not exported to other apps.
         startApp = AppType.entries.firstOrNull { it.name == intent.getStringExtra("open") }
+        // Test hook (the activity is not exported): one photo, then four seconds of recording.
+        if (intent.getBooleanExtra("captureTest", false)) {
+            gl.postDelayed({ capturePhoto() }, 12_000)
+            gl.postDelayed({ toggleRecording() }, 15_000)
+            gl.postDelayed({ if (isRecording()) toggleRecording() }, 19_000)
+        }
         if (!head.available) voiceNotice = getString(R.string.no_gyro)
     }
 
@@ -173,6 +217,9 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     }
 
     override fun onPause() {
+        // The encoder must be detached while the GL thread still runs.
+        stopRecording(wait = true)
+        dictation?.cancel()
         saveLayout()
         calibration = null
         touchRay = null
@@ -195,6 +242,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         hands.close()
         voice.shutdown()
         feedback.release()
+        io.shutdown()
         super.onDestroy()
     }
 
@@ -218,6 +266,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     /** Leaves immersive viewing and says why. The camera view is never left frozen. */
     private fun halt(reason: String) {
         if (halted != null) return
+        stopRecording()
         halted = reason
         stereo = false
         gestures.reset()
@@ -227,7 +276,6 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     }
 
     private fun resumeFromWarning() {
-        if (thermal() >= PowerManager.THERMAL_STATUS_SEVERE) return
         halted = null
         warning.visibility = View.GONE
         camera.stop()
@@ -235,8 +283,6 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         settings.passthrough = false // continue safely; passthrough can be re-enabled later
         if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
     }
-
-    private fun thermal() = getSystemService(PowerManager::class.java).currentThermalStatus
 
     private val frame = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
@@ -256,23 +302,16 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             cameraRotation = displayRotation
             camera.setRotation(displayRotation)
         }
-        val heat = thermal()
-        // A slow phone gets fewer effects; heat counts the same way.
-        val measured = governor.update(renderer.fps, now)
-        val level = if (heat >= PowerManager.THERMAL_STATUS_MODERATE) PerformanceGovernor.MAX_LEVEL else measured
+        // A slow phone gets fewer effects.
+        val level = governor.update(renderer.fps, now)
         Motion.level = level
         if (level != loggedLevel) {
             loggedLevel = level
             Log.i("NexusXR", "Performance level $level at ${renderer.fps} FPS")
         }
-        hands.minIntervalMs = when {
-            heat >= PowerManager.THERMAL_STATUS_MODERATE -> 80
-            level == PerformanceGovernor.MAX_LEVEL -> 55
-            else -> 33
-        }
+        hands.minIntervalMs = if (level == PerformanceGovernor.MAX_LEVEL) 55 else 33
         hands.extraTurns = settings.cameraTurns
         hands.swapSides = settings.swapHandSides
-        if (heat >= PowerManager.THERMAL_STATUS_SEVERE) halt(getString(R.string.too_hot))
         val passthrough = settings.passthrough
         val lastFrame = renderer.lastCameraFrameMs
         if (passthrough && cameraRunning && now - maxOf(lastFrame, cameraStartedAt) > if (lastFrame < cameraStartedAt) FIRST_FRAME_MS else 1500) {
@@ -327,6 +366,10 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             }
         }
         stepCalibration(now)
+        recording?.let {
+            val seconds = (SystemClock.elapsedRealtime() - it.startedAt) / 1000
+            recordingBadge.text = "● REC %02d:%02d".format(seconds / 60, seconds % 60)
+        }
 
         val centreRay = viewportRay(orientation, 0.5f, 0.5f, fov, aspect)
         // With look-and-pinch the view's centre highlights even before a hand appears.
@@ -530,6 +573,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         val audio = getSystemService(AudioManager::class.java)
         if (audio.requestAudioFocus(audioFocus) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) return
         voiceNotice = ""
+        dictation?.cancel()
         voice.engine.start(voice.settings.selectedLanguage).invokeOnCompletion { audio.abandonAudioFocusRequest(audioFocus) }
     }
 
@@ -585,14 +629,153 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
 
     override fun videoUri() = video
 
+    override fun play(uri: Uri) {
+        video = uri
+        open(AppType.MEDIA)
+    }
+
+    override fun pickPhotos() {
+        stereo = false
+        photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+    }
+
+    override fun pickedPhotos() = photos
+
+    override fun pickFolder() {
+        stereo = false
+        folderPicker.launch(null)
+    }
+
+    /** The saved folder, only while Android still grants access to it. */
+    override fun pickedFolder(): Uri? = contentResolver.persistedUriPermissions
+        .firstOrNull { it.isReadPermission && it.uri.toString() == settings.folder }?.uri
+
+    override fun libraryVersion() = library
+    override fun canSuggest() = target()?.canSuggest() == true
+
+    override fun dictate() {
+        dictation?.let { it.cancel(); return }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            dictationPermission.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        val field = windows.focused?.id ?: return
+        voice.engine.cancel() // one user of the microphone at a time
+        val audio = getSystemService(AudioManager::class.java)
+        if (audio.requestAudioFocus(audioFocus) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) return
+        dictation = lifecycleScope.launch {
+            try {
+                showHud("● " + getString(R.string.listening), Long.MAX_VALUE)
+                voice.stt.listen(voice.settings.selectedLanguage).collect { event ->
+                    when (event) {
+                        is SttEvent.Partial -> showHud("● " + event.text, Long.MAX_VALUE)
+                        // Typed into the field that was focused when dictation began.
+                        is SttEvent.Final -> surfaces[field]?.type(event.text + " ")
+                    }
+                }
+                hudUntil = 0
+            } catch (e: CancellationException) {
+                hudUntil = 0
+                throw e
+            } catch (e: Exception) {
+                showHud(e.message ?: e.javaClass.simpleName, SystemClock.uptimeMillis() + 4000)
+            } finally {
+                audio.abandonAudioFocusRequest(audioFocus)
+                dictation = null
+            }
+        }
+    }
+
+    override fun capturePhoto() {
+        feedback.click()
+        renderer.requestPhoto { pixels, w, h ->
+            io.execute {
+                val saved = savePhoto(applicationContext, pixels, w, h)
+                runOnUiThread {
+                    library++
+                    Log.i("NexusXR", if (saved) "Photo saved" else "Photo failed")
+                    showHud(getString(if (saved) R.string.photo_saved else R.string.capture_failed), SystemClock.uptimeMillis() + 3000)
+                }
+            }
+        }
+    }
+
+    override fun toggleRecording() {
+        if (recording != null) return stopRecording()
+        val capture = VideoCapture.start(applicationContext, gl.width, gl.height)
+        if (capture == null) {
+            showHud(getString(R.string.capture_failed), SystemClock.uptimeMillis() + 3000)
+            return
+        }
+        recording = capture
+        recordingBadge.visibility = View.VISIBLE
+        renderer.startEncoding(capture.surface, capture.width, capture.height) { stopRecording() }
+    }
+
+    override fun isRecording() = recording != null
+
+    private fun stopRecording(wait: Boolean = false) {
+        val capture = recording ?: return
+        recording = null
+        recordingBadge.visibility = View.GONE
+        val detached = CountDownLatch(1)
+        renderer.stopEncoding {
+            detached.countDown()
+            if (!wait) runOnUiThread { finishRecording(capture) }
+        }
+        if (wait) {
+            detached.await(1, TimeUnit.SECONDS)
+            finishRecording(capture)
+        }
+    }
+
+    private fun finishRecording(capture: VideoCapture) {
+        val saved = capture.finish()
+        library++
+        Log.i("NexusXR", if (saved) "Recording saved" else "Recording failed")
+        showHud(getString(if (saved) R.string.video_saved else R.string.capture_failed), SystemClock.uptimeMillis() + 3000)
+    }
+
+    /** Recognised commands are carried out here; anything else goes to the AI model. */
+    private fun onSpeech(sentence: String): String? {
+        val result = commands.handle(sentence, SystemClock.uptimeMillis()) ?: return null
+        val arabic = sentence.any { it in '\u0600'..'\u06FF' }
+        fun say(english: String, arabicText: String) = if (arabic) arabicText else english
+        return when (result) {
+            is CommandResult.AskToConfirm -> say("That closes things. Say confirm to continue, or cancel.", "ده هيقفل حاجات. قول تأكيد علشان أكمل، أو إلغاء.")
+            CommandResult.Cancelled -> say("Cancelled.", "تمام، لغيت.")
+            is CommandResult.Run -> {
+                run(result.command)
+                say("Done.", "تمام.")
+            }
+        }
+    }
+
+    private fun run(command: VoiceCommand) {
+        when (command) {
+            is VoiceCommand.Open -> open(command.app)
+            is VoiceCommand.Close -> windows.find(command.app)?.let { windows.close(it.id); onClosed(it.id) }
+            VoiceCommand.CloseAll -> {
+                // The assistant stays, so it can finish its reply.
+                windows.windows.filter { it.app != AppType.ASSISTANT }.forEach { windows.close(it.id) }
+                open(AppType.HOME)
+            }
+            VoiceCommand.Exit -> gl.postDelayed({ exit() }, 1500)
+            VoiceCommand.Recenter -> recenter()
+            VoiceCommand.Arrange -> arrange()
+            VoiceCommand.Cinema -> toggleCinema()
+            VoiceCommand.Photo -> capturePhoto()
+        }
+    }
+
     override fun statusLine(): String {
         val battery = getSystemService(BatteryManager::class.java).getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         val time = android.text.format.DateFormat.getTimeFormat(this).format(java.util.Date())
         val latest = hands.latest
         val hand = hands.error?.let { "✗ $it" }
             ?: latest?.let { "${it.hands.size} · ${it.latencyMs} ms" } ?: "…"
-        return "$time · 🔋 $battery% · ${renderer.fps} FPS\n" +
-            getString(R.string.status_tracking, getString(if (head.available) R.string.three_dof else R.string.no_tracking), hand, thermal()) +
+        return "$time · $battery% · ${renderer.fps} FPS\n" +
+            getString(R.string.status_tracking, getString(if (head.available) R.string.three_dof else R.string.no_tracking), hand) +
             (if (voiceNotice.isEmpty()) "" else "\n$voiceNotice")
     }
 

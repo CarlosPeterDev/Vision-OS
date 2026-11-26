@@ -21,6 +21,7 @@ import android.widget.*
 import com.nexus.visionos.R
 import com.nexus.xr.AppType
 import com.nexus.xr.Calculator
+import com.nexus.xr.WordSuggester
 import java.io.File
 
 fun buildApp(context: Context, type: AppType, shell: Shell): SpatialApp = when (type) {
@@ -35,62 +36,10 @@ fun buildApp(context: Context, type: AppType, shell: Shell): SpatialApp = when (
     AppType.KEYBOARD -> keyboard(context, shell)
     AppType.CENTER -> controlCenter(context, shell)
     AppType.TUTORIAL -> tutorial(context, shell)
-    AppType.PHOTOS, AppType.FILES, AppType.CAMERA, AppType.LAUNCHER -> SpatialApp(View(context))
-}
-
-@SuppressLint("SetJavaScriptEnabled")
-private fun browser(context: Context, shell: Shell): SpatialApp {
-    val web = WebView(context)
-    val address = editor(context).apply { isSingleLine = true; hint = context.getString(R.string.address_hint) }
-    fun go(input: String) {
-        val text = input.trim()
-        if (text.isEmpty()) return
-        val url = when {
-            text.startsWith("https://") -> text
-            text.startsWith("http://") -> "https://" + text.removePrefix("http://")
-            '.' in text && ' ' !in text -> "https://$text"
-            else -> "https://www.google.com/search?q=" + Uri.encode(text)
-        }
-        web.loadUrl(url)
-        web.requestFocus()
-    }
-    web.settings.apply {
-        javaScriptEnabled = true
-        domStorageEnabled = true
-        allowFileAccess = false
-        allowContentAccess = false
-        setGeolocationEnabled(false)
-    }
-    web.webViewClient = object : WebViewClient() {
-        // Only web pages stay inside the browser; app links and other schemes are ignored.
-        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = request.url.scheme != "https"
-        override fun onPageFinished(view: WebView, url: String) { if (!address.hasFocus()) address.setText(url) }
-    }
-    web.webChromeClient = object : WebChromeClient() {
-        override fun onPermissionRequest(request: PermissionRequest) = request.deny()
-    }
-    address.setOnKeyListener { _, code, event ->
-        if (code == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_UP) go(address.text.toString())
-        code == KeyEvent.KEYCODE_ENTER
-    }
-    val bar = LinearLayout(context).apply {
-        layoutDirection = View.LAYOUT_DIRECTION_LTR
-        iconKey(R.drawable.ic_ui_back) { if (web.canGoBack()) web.goBack() }
-        iconKey(R.drawable.ic_ui_forward) { if (web.canGoForward()) web.goForward() }
-        iconKey(R.drawable.ic_ui_reload) { web.reload() }
-        addView(address, LinearLayout.LayoutParams(0, -1, 6f))
-        iconKey(R.drawable.ic_ui_go) { go(address.text.toString()) }
-        iconKey(R.drawable.ic_ui_keyboard) { shell.open(AppType.KEYBOARD) }
-    }
-    val view = LinearLayout(context).apply {
-        orientation = LinearLayout.VERTICAL
-        addView(bar, LinearLayout.LayoutParams(-1, context.px(52)))
-        addView(web, LinearLayout.LayoutParams(-1, 0, 1f))
-    }
-    go(shell.pendingUrl() ?: "https://www.google.com")
-    // The shell reaches an already open browser through the root view's tag.
-    view.tag = { url: String -> go(url) }
-    return SpatialApp(view) { web.stopLoading(); web.destroy() }
+    AppType.PHOTOS -> photos(context, shell)
+    AppType.FILES -> files(context, shell)
+    AppType.CAMERA -> captureApp(context, shell)
+    AppType.LAUNCHER -> appLauncher(context, shell)
 }
 
 private fun notes(context: Context, shell: Shell): SpatialApp {
@@ -244,9 +193,47 @@ private fun keyboard(context: Context, shell: Shell): SpatialApp {
     val names = listOf("EN", "عربي", "123", "تشكيل")
     var layout = if (context.resources.configuration.locales[0].language == "ar") 1 else 0
     var shift = false
-    val view = context.vertical { layoutDirection = View.LAYOUT_DIRECTION_LTR }
+    val store = context.applicationContext.getSharedPreferences("words", Context.MODE_PRIVATE)
+    val suggester = WordSuggester(store.getString("learned", "").orEmpty())
+    fun remember(word: String) {
+        if (word.isEmpty() || !shell.canSuggest()) return
+        suggester.learn(word)
+        store.edit().putString("learned", suggester.state()).apply()
+    }
+    lateinit var suggestions: LinearLayout
+    var offered = emptyList<String>()
+    fun suggest() {
+        val word = if (shell.canSuggest()) suggester.currentWord(shell.textBeforeCursor()) else ""
+        val next = suggester.suggest(word)
+        if (next == offered && suggestions.childCount > 0) return
+        offered = next
+        suggestions.removeAllViews()
+        suggestions.iconKey(R.drawable.ic_ui_mic) { shell.dictate() }
+        for (i in 0..2) {
+            val choice = next.getOrNull(i)
+            val button = suggestions.key(choice.orEmpty(), 3f, 0x9CD2FF) {
+                if (choice != null && shell.canSuggest()) {
+                    val typed = suggester.currentWord(shell.textBeforeCursor())
+                    shell.replaceBeforeCursor(typed.length, "$choice ")
+                    remember(choice)
+                }
+            }
+            button.visibility = if (choice == null) View.INVISIBLE else View.VISIBLE
+        }
+    }
+    /** A space ends a word, which is when it is worth remembering. */
+    fun space() {
+        remember(suggester.currentWord(shell.textBeforeCursor()))
+        shell.typeText(" ")
+    }
+    val view = context.vertical {
+        layoutDirection = View.LAYOUT_DIRECTION_LTR
+        setPadding(context.px(6), context.px(4), context.px(6), context.px(4))
+    }
     fun render() {
         view.removeAllViews()
+        view.row(0.9f) { suggestions = this }
+        offered = emptyList()
         layouts[layout].forEachIndexed { index, letters ->
             view.row(1f) {
                 // Arabic rows are listed in right-to-left keyboard order.
@@ -261,17 +248,17 @@ private fun keyboard(context: Context, shell: Shell): SpatialApp {
         }
         view.row(1f) {
             names.forEachIndexed { i, name -> if (i != layout) key(name, 1.2f) { layout = i; render() } }
-            key(context.getString(R.string.space), 3f) { shell.typeText(" ") }
+            key(context.getString(R.string.space), 2.6f) { space() }
             iconKey(R.drawable.ic_ui_back) { shell.sendKey(KeyEvent.KEYCODE_DPAD_LEFT) }
             iconKey(R.drawable.ic_ui_forward) { shell.sendKey(KeyEvent.KEYCODE_DPAD_RIGHT) }
             iconKey(R.drawable.ic_ui_enter, weight = 1.5f) { shell.sendKey(KeyEvent.KEYCODE_ENTER) }
-        }
-        view.row(1f) {
-            key(context.getString(R.string.select_all)) { shell.editAction(android.R.id.selectAll) }
+            key(context.getString(R.string.select_all), 1.2f) { shell.editAction(android.R.id.selectAll) }
             key(context.getString(R.string.copy)) { shell.editAction(android.R.id.copy) }
             key(context.getString(R.string.paste)) { shell.editAction(android.R.id.paste) }
         }
+        suggest()
     }
     render()
-    return SpatialApp(view)
+    val stop = ticker(400) { suggest() }
+    return SpatialApp(view, stop)
 }

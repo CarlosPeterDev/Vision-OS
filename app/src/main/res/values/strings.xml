@@ -64,7 +64,7 @@
     <string name="app_calculator">Calculator</string>
     <string name="app_clock">Clock</string>
     <string name="app_media">Player</string>
-    <string name="app_controls">Controls</string>
+    <string name="app_controls">Settings</string>
     <string name="app_assistant">Nexus</string>
     <string name="app_keyboard">Keyboard</string>
     <string name="exit_spatial">Exit</string>
@@ -82,12 +82,11 @@
     <string name="paste">Paste</string>
     <string name="camera_denied_virtual">Camera denied: virtual environment, hand control is off. Use touch.</string>
     <string name="camera_stalled">The camera stopped sending frames. Immersive view stopped for safety. Remove the headset.</string>
-    <string name="too_hot">The phone is too hot. Immersive view stopped. Let it cool down.</string>
     <string name="tap_continue">Tap to continue in the virtual environment.</string>
     <string name="no_gyro">No rotation sensor: windows stay fixed on screen.</string>
     <string name="three_dof">rotation only (3DoF)</string>
     <string name="no_tracking">none</string>
-    <string name="status_tracking">Head: %1$s\nHands: %2$s · Thermal: %3$d</string>
+    <string name="status_tracking">Head: %1$s\nHands: %2$s</string>
     <string name="ctl_recenter">Recenter</string>
     <string name="ctl_arrange">Arrange</string>
     <string name="ctl_environment">Camera / virtual</string>
@@ -176,10 +175,39 @@
         <item>Steady</item>
     </string-array>
     <string-array name="tutorial_steps">
-        <item>Pinch the Skip button’s window, anywhere on it, to make your first tap.</item>
+        <item>Pinch anywhere on this window to make your first tap.</item>
         <item>Pinch inside the list below and move your hand to scroll it.</item>
         <item>Pinch the bar under a window and move it.</item>
         <item>Pinch the corner at a window’s lower right and drag to resize.</item>
         <item>Hold an open hand still: back of the hand shows Home, palm towards your face opens Control Center.</item>
     </string-array>
+    <string name="dismiss">Close</string>
+    <string name="download">Download</string>
+    <string name="download_question">Download “%1$s” from %2$s?</string>
+    <string name="download_started">Download started. See the Downloads folder.</string>
+    <string name="download_failed">The download could not start</string>
+    <string name="download_unsupported">Only secure (https) downloads are supported</string>
+    <string name="tab_number">Tab %1$d</string>
+    <string name="no_bookmarks">No bookmarks yet. Tap the star to save a page.</string>
+    <string name="choose_photos">Choose pictures</string>
+    <string name="photos_empty">Your captures appear here. You can also choose pictures.</string>
+    <string name="choose_folder">Choose folder</string>
+    <string name="chosen_folder">Folder</string>
+    <string name="files_empty">Choose a folder to browse it. Files are only read, never changed.</string>
+    <string name="file_unreadable">This could not be read</string>
+    <string name="file_unsupported">This file type cannot be previewed</string>
+    <string name="apps_note">Apps open full screen and leave spatial mode.</string>
+    <string name="apps_none">No other apps were found</string>
+    <string name="apps_confirm">Open %1$s? This leaves spatial mode. Take off the headset first.</string>
+    <string name="open_app">Open</string>
+    <string name="capture_note">Saved to your gallery. A capture shows whatever the camera sees. Video has no sound.</string>
+    <string name="take_photo">Take photo</string>
+    <string name="start_recording">Record video</string>
+    <string name="stop_recording">Stop recording</string>
+    <string name="photo_saved">Photo saved</string>
+    <string name="video_saved">Video saved</string>
+    <string name="capture_failed">Capture failed</string>
+    <string name="listening">Listening…</string>
+    <string name="clear_words">Forget learned words</string>
+    <string name="words_cleared">Learned words deleted</string>
 </resources>

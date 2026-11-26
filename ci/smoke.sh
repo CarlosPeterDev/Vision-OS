@@ -48,11 +48,19 @@ press 1200
 wait_for "open CALCULATOR" 20
 sleep 8
 adb exec-out screencap -p > smoke/spatial-after-tap.png
+# A photo and a short recording must both be written to the media store.
+adb shell am force-stop $PKG
+adb logcat -c
+adb shell am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --es open CAMERA --ez captureTest true
+wait_for "Photo saved" 60
+wait_for "Recording saved" 60
+adb exec-out screencap -p > smoke/app-camera.png
+adb logcat -d > smoke/logcat-capture.txt
 # Screens of other windows, for review.
-for apps in CENTER SETTINGS; do
+for apps in CENTER SETTINGS BROWSER PHOTOS FILES LAUNCHER KEYBOARD; do
   adb shell am force-stop $PKG
   adb shell am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --es open $apps
-  sleep 25
+  sleep 22
   adb exec-out screencap -p > smoke/app-$(echo $apps | tr 'A-Z' 'a-z').png
 done
 adb shell am force-stop $PKG
@@ -62,7 +70,8 @@ adb exec-out screencap -p > smoke/headset.png
 adb shell am force-stop $PKG
 adb shell am start -W -n $PKG/.MainActivity; sleep 8
 adb exec-out screencap -p > smoke/start-screen.png
-adb logcat -d > smoke/logcat.txt
+adb logcat -d > smoke/logcat-last.txt
+cat smoke/logcat-capture.txt smoke/logcat-last.txt > smoke/logcat.txt
 grep -E "NexusXR|FATAL EXCEPTION" smoke/logcat.txt > smoke/summary.txt
 grep -q "FATAL EXCEPTION" smoke/logcat.txt && { echo "FAIL: crash detected"; fail=1; }
 exit $fail

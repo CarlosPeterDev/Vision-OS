@@ -208,7 +208,13 @@ internal fun settingsApp(context: Context, shell: Shell): SpatialApp {
             option({ context.getString(R.string.ctl_arrange) }) { shell.arrange() }
             option({ context.getString(R.string.app_tutorial) }) { shell.open(AppType.TUTORIAL) }
         }
-        row(height = context.px(46)) { option({ context.getString(R.string.exit_spatial) }) { shell.exit() } }
+        row(height = context.px(46)) {
+            option({ context.getString(R.string.clear_words) }) {
+                context.applicationContext.getSharedPreferences("words", Context.MODE_PRIVATE).edit().clear().apply()
+                status.text = context.getString(R.string.words_cleared)
+            }
+            option({ context.getString(R.string.exit_spatial) }) { shell.exit() }
+        }
     }
     val stop = ticker(1000) { status.text = shell.statusLine() }
     return SpatialApp(view, stop)

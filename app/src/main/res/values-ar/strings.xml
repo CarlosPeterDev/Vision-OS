@@ -64,7 +64,7 @@
     <string name="app_calculator">الآلة الحاسبة</string>
     <string name="app_clock">الساعة</string>
     <string name="app_media">المشغل</string>
-    <string name="app_controls">التحكم</string>
+    <string name="app_controls">الإعدادات</string>
     <string name="app_assistant">نيكسس</string>
     <string name="app_keyboard">الكيبورد</string>
     <string name="exit_spatial">خروج</string>
@@ -82,12 +82,11 @@
     <string name="paste">لصق</string>
     <string name="camera_denied_virtual">الكاميرا مرفوضة: بيئة افتراضية والتحكم باليد مقفول. استخدم اللمس.</string>
     <string name="camera_stalled">الكاميرا وقفت. العرض اتوقف للأمان. اقلع النضارة.</string>
-    <string name="too_hot">الموبايل سخن جدًا. العرض اتوقف. سيبه يبرد.</string>
     <string name="tap_continue">المس للمتابعة في البيئة الافتراضية.</string>
     <string name="no_gyro">مفيش حساس دوران: النوافذ هتفضل ثابتة على الشاشة.</string>
     <string name="three_dof">دوران فقط (3DoF)</string>
     <string name="no_tracking">مفيش</string>
-    <string name="status_tracking">الرأس: %1$s\nالإيدين: %2$s · الحرارة: %3$d</string>
+    <string name="status_tracking">الرأس: %1$s\nالإيدين: %2$s</string>
     <string name="ctl_recenter">توسيط</string>
     <string name="ctl_arrange">ترتيب النوافذ</string>
     <string name="ctl_environment">كاميرا / افتراضي</string>
@@ -182,4 +181,33 @@
         <item>اضم على الركن اللي تحت على اليمين واسحب علشان تغير الحجم.</item>
         <item>ثبت كف مفتوح: ظهر الإيد يفتح الرئيسية، وكف الإيد ناحية وشك يفتح مركز التحكم.</item>
     </string-array>
+    <string name="dismiss">إغلاق</string>
+    <string name="download">تنزيل</string>
+    <string name="download_question">تنزل \u201c%1$s\u201d من %2$s؟</string>
+    <string name="download_started">التنزيل بدأ. هتلاقيه في مجلد التنزيلات.</string>
+    <string name="download_failed">التنزيل ما بدأش</string>
+    <string name="download_unsupported">التنزيل متاح من روابط https بس</string>
+    <string name="tab_number">تبويب %1$d</string>
+    <string name="no_bookmarks">مفيش مفضلة لسه. دوس على النجمة علشان تحفظ صفحة.</string>
+    <string name="choose_photos">اختار صور</string>
+    <string name="photos_empty">الصور اللي بتصورها هتظهر هنا، وتقدر تختار صور كمان.</string>
+    <string name="choose_folder">اختار مجلد</string>
+    <string name="chosen_folder">المجلد</string>
+    <string name="files_empty">اختار مجلد تتصفحه. الملفات للقراءة بس ومش بتتغير.</string>
+    <string name="file_unreadable">مقدرتش أقرا ده</string>
+    <string name="file_unsupported">نوع الملف ده مش بيتعرض</string>
+    <string name="apps_note">التطبيقات بتفتح على الشاشة كلها وبتخرج من الوضع المكاني.</string>
+    <string name="apps_none">مفيش تطبيقات تانية</string>
+    <string name="apps_confirm">تفتح %1$s؟ هتخرج من الوضع المكاني. اقلع النضارة الأول.</string>
+    <string name="open_app">فتح</string>
+    <string name="capture_note">الحفظ في المعرض. الصورة فيها كل اللي الكاميرا شايفاه. الفيديو من غير صوت.</string>
+    <string name="take_photo">التقط صورة</string>
+    <string name="start_recording">سجل فيديو</string>
+    <string name="stop_recording">وقف التسجيل</string>
+    <string name="photo_saved">الصورة اتحفظت</string>
+    <string name="video_saved">الفيديو اتحفظ</string>
+    <string name="capture_failed">التصوير فشل</string>
+    <string name="listening">بسمعك…</string>
+    <string name="clear_words">امسح الكلمات المحفوظة</string>
+    <string name="words_cleared">الكلمات المحفوظة اتمسحت</string>
 </resources>

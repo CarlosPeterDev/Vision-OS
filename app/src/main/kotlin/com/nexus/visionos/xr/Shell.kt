@@ -30,6 +30,21 @@ interface Shell {
     fun replaceBeforeCursor(count: Int, text: String)
     fun pickVideo()
     fun videoUri(): Uri?
+    /** Shows a video or audio file in the player window. */
+    fun play(uri: Uri)
+    fun pickPhotos()
+    fun pickedPhotos(): List<Uri>
+    fun pickFolder()
+    fun pickedFolder(): Uri?
+    /** Changes whenever picked or captured content changes. */
+    fun libraryVersion(): Int
+    /** False for password fields and web pages, whose text is never read or learned. */
+    fun canSuggest(): Boolean
+    /** Types what the user says into the focused field; calling again stops it. */
+    fun dictate()
+    fun capturePhoto()
+    fun toggleRecording()
+    fun isRecording(): Boolean
     fun statusLine(): String
 
     fun recenter()

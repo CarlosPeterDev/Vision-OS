@@ -77,6 +77,26 @@ class XrRenderer(
     @Volatile var fps = 0
         private set
 
+    private val photoRequest = java.util.concurrent.atomic.AtomicReference<((ByteBuffer, Int, Int) -> Unit)?>(null)
+    private var encoder: EncoderTarget? = null
+
+    /** The next finished frame is handed to [result] on the GL thread. */
+    fun requestPhoto(result: (ByteBuffer, Int, Int) -> Unit) = photoRequest.set(result)
+
+    fun startEncoding(surface: Surface, w: Int, h: Int, onError: () -> Unit) = view.queueEvent {
+        runCatching { encoder = EncoderTarget(surface, w, h) }.onFailure {
+            Log.e("NexusXR", "Encoder failed", it)
+            postToMain(onError)
+        }
+    }
+
+    /** [done] runs once no more frames will reach the encoder. */
+    fun stopEncoding(done: () -> Unit) = view.queueEvent {
+        encoder?.release()
+        encoder = null
+        done()
+    }
+
     private class External(val texture: Int, val surfaceTexture: SurfaceTexture, val surface: Surface) {
         val matrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
         val fresh = AtomicBoolean(false)
@@ -149,6 +169,7 @@ class XrRenderer(
     // ---- GL thread ----
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
+        encoder = null
         // A new context: every old GL object is already gone.
         titles.clear()
         icons.clear()
@@ -260,6 +281,19 @@ class XrRenderer(
             }
         }
         if (!logged) { logged = true; Log.i("NexusXR", "First XR frame rendered") }
+        capture()
+    }
+
+    private fun capture() {
+        photoRequest.getAndSet(null)?.let { result ->
+            glBindFramebuffer(GL_FRAMEBUFFER, 0)
+            val pixels = ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.nativeOrder())
+            glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels)
+            // The saved picture is opaque.
+            for (i in 3 until pixels.capacity() step 4) pixels.put(i, -1)
+            result(pixels, width, height)
+        }
+        encoder?.copyFrame(width, height)
     }
 
     private fun countFrame() {
