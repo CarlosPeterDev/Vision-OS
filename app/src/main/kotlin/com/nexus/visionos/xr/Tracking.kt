@@ -104,7 +104,7 @@ class HandTracker(context: Context) : ImageAnalysis.Analyzer {
     override fun analyze(image: ImageProxy) {
         image.use {
             val now = SystemClock.uptimeMillis()
-            if (now - lastSubmit < minIntervalMs || (busySince != 0L && now - busySince < 600)) return
+            if (now - lastSubmit < minIntervalMs || (busySince != 0L && now - busySince < STALL_MS)) return
             try {
                 val source: Bitmap = it.toBitmap()
                 val degrees = it.imageInfo.rotationDegrees - extraTurns * 90
@@ -125,6 +125,8 @@ class HandTracker(context: Context) : ImageAnalysis.Analyzer {
             }
         }
     }
+
+    private companion object { const val STALL_MS = 3000L }
 
     @Synchronized fun close() {
         closed = true

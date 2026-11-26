@@ -32,7 +32,7 @@ adb exec-out screencap -p > smoke/spatial-home.png
 # Touch goes through the same ray, window and virtual display path as a pinch.
 # The middle of the upper icon row in Home is the Calculator.
 read -r W H < <(adb shell dumpsys window displays | grep -o 'cur=[0-9]*x[0-9]*' | head -1 | sed 's/cur=//; s/x/ /')
-adb shell input tap $((W / 2)) $((H * 47 / 100))
+adb shell input swipe $((W / 2)) $((H * 47 / 100)) $((W / 2)) $((H * 47 / 100)) 200
 wait_for "Spatial surface nexus-2 ready" 20
 sleep 6
 adb exec-out screencap -p > smoke/spatial-after-tap.png

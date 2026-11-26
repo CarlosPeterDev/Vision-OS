@@ -343,6 +343,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             MotionEvent.ACTION_CANCEL -> PointerPhase.CANCEL
             else -> return
         }
+        if (phase == PointerPhase.DOWN) Log.i("NexusXR", "screen touch hits ${windows.pick(ray)}")
         controller.handle(TOUCH_POINTER, phase, ray)
     }
 
@@ -371,6 +372,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
 
     override fun open(app: AppType) {
         val look = head.orientation()
+        Log.i("NexusXR", "open $app")
         windows.open(app, yawOf(look), pitchOf(look))
     }
 

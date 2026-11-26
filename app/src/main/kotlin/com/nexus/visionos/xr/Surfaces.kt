@@ -89,7 +89,10 @@ class SpatialSurface(
         }
         val event = MotionEvent.obtain(downTime, now, code, x, y, 0)
         event.source = InputDevice.SOURCE_TOUCHSCREEN
-        target.dispatchTouchEvent(event)
+        val consumed = target.dispatchTouchEvent(event)
+        if (action != TouchAction.MOVE) {
+            Log.i("NexusXR", "touch $name $action at %.0f,%.0f consumed=$consumed size=${target.width}x${target.height}".format(x, y))
+        }
         event.recycle()
     }
 
