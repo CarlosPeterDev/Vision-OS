@@ -40,6 +40,7 @@ class HeadTracker(context: Context) : SensorEventListener {
     fun start() { sensor?.let { manager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) } }
     fun stop() { manager.unregisterListener(this) }
     fun recenter() { yawOffset = null }
+    val hasReading get() = device != null
 
     /** Latest camera orientation. Without a sensor the view stays fixed and says so in Settings. */
     fun orientation(): Quat {
@@ -85,6 +86,7 @@ class HandTracker(context: Context) : ImageAnalysis.Analyzer {
             .setMinHandPresenceConfidence(0.5f)
             .setMinTrackingConfidence(0.5f)
             .setResultListener { result, _ ->
+                if (latest == null) Log.i("NexusXR", "First hand tracking result")
                 val now = SystemClock.uptimeMillis()
                 val hands = result.landmarks().map { list -> list.map { Point(it.x(), it.y()) } }
                 latest = HandFrame(identity.assign(hands), aspect, now, now - result.timestampMs())

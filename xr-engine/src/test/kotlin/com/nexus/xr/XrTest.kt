@@ -174,6 +174,18 @@ class XrTest {
             assertThrows(IllegalArgumentException::class.java) { Calculator.evaluate(bad) }
     }
 
+    @Test fun windowsOpenWhereTheUserLooks() {
+        for (pitch in listOf(-0.6f, 0f, 0.5f)) {
+            val look = Quat.axisAngle(Vec3(0f, 1f, 0f), -1.4f) * Quat.axisAngle(Vec3(1f, 0f, 0f), pitch)
+            val m = WindowManager()
+            val w = m.open(AppType.HOME, yawOf(look), pitchOf(look))
+            val centre = viewportRay(look, 0.5f, 0.5f, 50f, 2f)
+            assertEquals(w.id, m.pick(centre)?.windowId)
+            m.arrange(yawOf(look), pitchOf(look))
+            assertEquals(Region.CONTENT, m.pick(centre)?.region)
+        }
+    }
+
     @Test fun handIdsFollowPositions() {
         val ids = HandIdentity()
         fun at(x: Float) = List(21) { Point(x, 0.5f) }

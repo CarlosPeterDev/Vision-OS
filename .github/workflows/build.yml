@@ -39,6 +39,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -59,6 +61,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: smoke, path: smoke/ }
+      - name: Publish failed-run evidence
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "smoke-failed-${GITHUB_RUN_NUMBER}" smoke/* \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title "Failed emulator run ${GITHUB_RUN_NUMBER}" --notes "Diagnostics only. No app build here."
 
   release:
     needs: [build, smoke]

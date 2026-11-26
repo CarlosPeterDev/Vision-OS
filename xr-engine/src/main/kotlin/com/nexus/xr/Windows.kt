@@ -85,9 +85,11 @@ class WindowManager(private val maxWindows: Int = 6) {
     fun find(app: AppType) = items.firstOrNull { it.app == app }
 
     /** Opens or restores the single window of [app]. Returns evicted window ids through [onEvict]. */
-    fun open(app: AppType, headYaw: Float, onEvict: (Int) -> Unit = {}): SpatialWindow {
+    fun open(app: AppType, headYaw: Float, headPitch: Float = 0f, onEvict: (Int) -> Unit = {}): SpatialWindow {
+        val eye = headPitch.coerceIn(-0.7f, 0.7f)
         find(app)?.let { existing ->
-            val shown = existing.copy(minimized = false, yaw = if (existing.minimized) headYaw else existing.yaw)
+            val shown = if (existing.minimized) existing.copy(minimized = false, yaw = headYaw, pitch = restingPitch(app, eye))
+            else existing
             replace(shown)
             focus(shown.id)
             return shown
@@ -108,12 +110,15 @@ class WindowManager(private val maxWindows: Int = 6) {
         val used = items.count { !it.minimized && it.app != AppType.KEYBOARD }
         val offset = if (keyboard) 0f else floatArrayOf(0f, 0.62f, -0.62f, 1.24f, -1.24f, 0f)[used % 6]
         val window = SpatialWindow(
-            nextId++, app, headYaw + offset, if (keyboard) -0.38f else 0.02f,
+            nextId++, app, headYaw + offset, restingPitch(app, eye),
             if (keyboard) 1.35f else 1.7f, width, height
         )
         items += window
         return window
     }
+
+    /** The keyboard rests below the line of sight, everything else on it. */
+    private fun restingPitch(app: AppType, eye: Float) = if (app == AppType.KEYBOARD) eye - 0.38f else eye
 
     fun replace(window: SpatialWindow) {
         val i = items.indexOfFirst { it.id == window.id }
@@ -141,12 +146,13 @@ class WindowManager(private val maxWindows: Int = 6) {
     }
 
     /** Lays visible windows side by side around [headYaw]. */
-    fun arrange(headYaw: Float) {
+    fun arrange(headYaw: Float, headPitch: Float = 0f) {
+        val eye = headPitch.coerceIn(-0.7f, 0.7f)
         val visible = items.filter { !it.minimized && it.app != AppType.KEYBOARD }
         visible.forEachIndexed { i, w ->
             val slot = if (i % 2 == 0) i / 2 else -(i + 1) / 2
-            replace(w.copy(yaw = headYaw + slot * 0.68f, pitch = 0.02f, distance = 1.75f, scale = 1f))
+            replace(w.copy(yaw = headYaw + slot * 0.68f, pitch = eye, distance = 1.75f, scale = 1f))
         }
-        find(AppType.KEYBOARD)?.let { replace(it.copy(yaw = headYaw, pitch = -0.38f, distance = 1.35f, scale = 1f)) }
+        find(AppType.KEYBOARD)?.let { replace(it.copy(yaw = headYaw, pitch = eye - 0.38f, distance = 1.35f, scale = 1f)) }
     }
 }

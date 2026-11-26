@@ -54,6 +54,9 @@ fun yawOf(q: Quat): Float {
     return atan2(u.x, -u.z)
 }
 
+/** Elevation of the view direction, positive upwards. */
+fun pitchOf(q: Quat): Float = asin(q.rotate(Vec3(0f, 0f, -1f)).y.coerceIn(-1f, 1f))
+
 /** Removes [yaw] so that the direction faced at recenter time becomes forward. */
 fun recentered(q: Quat, yaw: Float): Quat = Quat.axisAngle(Vec3(0f, 1f, 0f), yaw) * q
 

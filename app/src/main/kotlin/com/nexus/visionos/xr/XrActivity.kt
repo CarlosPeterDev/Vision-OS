@@ -14,6 +14,7 @@ import android.os.BatteryManager
 import android.os.Bundle
 import android.os.PowerManager
 import android.os.SystemClock
+import android.util.Log
 import android.view.Choreographer
 import android.view.Display
 import android.view.Gravity
@@ -69,6 +70,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     private var video: Uri? = null
     private var url: String? = null
     private var voiceNotice = ""
+    private var resumedAt = 0L
+    private var placed = false
 
     private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         if (it) startCamera() else useVirtual(getString(R.string.camera_denied_virtual))
@@ -86,6 +89,10 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(AndroidWindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // Use the whole panel, so the two headset views are centred on the physical screen.
+        window.attributes = window.attributes.apply {
+            layoutInDisplayCutoutMode = AndroidWindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).apply {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -131,6 +138,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         gl.onResume()
         head.start()
         running = true
+        resumedAt = SystemClock.uptimeMillis()
         if (passthrough || !cameraRunning) {
             if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
             else cameraPermission.launch(Manifest.permission.CAMERA)
@@ -220,12 +228,13 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         hands.minIntervalMs = if (heat >= PowerManager.THERMAL_STATUS_MODERATE) 80 else 33
         if (heat >= PowerManager.THERMAL_STATUS_SEVERE) halt(getString(R.string.too_hot))
         val lastFrame = renderer.lastCameraFrameMs
-        if (passthrough && cameraRunning && now - maxOf(lastFrame, cameraStartedAt) > if (lastFrame < cameraStartedAt) 8000 else 1500) {
+        if (passthrough && cameraRunning && now - maxOf(lastFrame, cameraStartedAt) > if (lastFrame < cameraStartedAt) FIRST_FRAME_MS else 1500) {
             halt(getString(R.string.camera_stalled))
         }
 
         val eyeWidth = if (stereo) gl.width / 2 else gl.width
         val aspect = if (gl.height > 0) eyeWidth.toFloat() / gl.height else 1.7f
+        placeWhenSettled(now)
         val orientation = head.orientation()
         val effectiveQuality = if (heat >= PowerManager.THERMAL_STATUS_MODERATE) 0 else quality
         val base = Scene(
@@ -266,7 +275,9 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
                 windows.minimize(existing.id)
             } else {
                 open(AppType.HOME)
-                windows.find(AppType.HOME)?.let { windows.replace(it.copy(yaw = yawOf(orientation), pitch = 0.02f, distance = 1.5f)) }
+                windows.find(AppType.HOME)?.let {
+                    windows.replace(it.copy(yaw = yawOf(orientation), pitch = pitchOf(orientation), distance = 1.5f))
+                }
             }
         }
 
@@ -288,6 +299,19 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             distortion = base.distortion, cameraTurns = base.cameraTurns, displayDegrees = base.displayDegrees,
             cameraFov = base.cameraFov, blank = halted != null
         )
+    }
+
+    /**
+     * The first sensor readings arrive while the user is still turning the phone, so "forward"
+     * is chosen after a short settle and the windows go exactly where the user is looking.
+     */
+    private fun placeWhenSettled(now: Long) {
+        if (placed || now - resumedAt < SETTLE_MS || !head.hasReading) return
+        placed = true
+        head.recenter()
+        val look = head.orientation()
+        windows.arrange(yawOf(look), pitchOf(look))
+        Log.i("NexusXR", "Windows placed at pitch %.2f".format(pitchOf(look)))
     }
 
     private fun syncSurfaces() {
@@ -346,7 +370,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     // ---- Shell ----
 
     override fun open(app: AppType) {
-        windows.open(app, yawOf(head.orientation()))
+        val look = head.orientation()
+        windows.open(app, yawOf(look), pitchOf(look))
     }
 
     override fun openUrl(url: String) {
@@ -390,8 +415,15 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             window.attributes = params
         }
         return listOf(
-            getString(R.string.ctl_recenter) to { head.recenter(); windows.arrange(0f) },
-            getString(R.string.ctl_arrange) to { windows.arrange(yawOf(head.orientation())) },
+            getString(R.string.ctl_recenter) to {
+                head.recenter()
+                val look = head.orientation()
+                windows.arrange(yawOf(look), pitchOf(look))
+            },
+            getString(R.string.ctl_arrange) to {
+                val look = head.orientation()
+                windows.arrange(yawOf(look), pitchOf(look))
+            },
             getString(R.string.ctl_environment) to { passthrough = !passthrough; cameraStartedAt = SystemClock.uptimeMillis(); save() },
             getString(R.string.ctl_glass) to { quality = (quality + 1) % 3; save() },
             getString(R.string.ctl_headset) to { stereo = !stereo },
@@ -422,6 +454,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     companion object {
         const val EXTRA_HEADSET = "headset"
         private const val TOUCH_POINTER = 100
+        private const val SETTLE_MS = 1500L
+        private const val FIRST_FRAME_MS = 15_000L
         private const val PIXELS_PER_METRE = 760
     }
 }

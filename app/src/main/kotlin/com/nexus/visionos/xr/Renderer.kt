@@ -194,6 +194,7 @@ class XrRenderer(
             glDeleteTextures(1, intArrayOf(old.texture), 0)
         }
         val e = external(request.resolution.width, request.resolution.height) {
+            if (lastCameraFrameMs == 0L) Log.i("NexusXR", "First camera frame")
             lastCameraFrameMs = android.os.SystemClock.uptimeMillis()
         }
         camera = e
