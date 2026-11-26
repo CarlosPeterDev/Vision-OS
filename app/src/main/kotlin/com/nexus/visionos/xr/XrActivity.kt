@@ -118,6 +118,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         stereo = intent.getBooleanExtra(EXTRA_HEADSET, false)
 
         head = HeadTracker(this)
+        head.fixed = intent.getBooleanExtra("fixedHead", false)
+        if (head.fixed) Log.i("NexusXR", "Head tracking held still for testing")
         hands = HandTracker(this)
         camera = CameraFeed(this, hands)
         cameraFov = camera.verticalFov()

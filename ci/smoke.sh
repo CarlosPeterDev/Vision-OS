@@ -12,6 +12,8 @@ adb shell settings put secure immersive_mode_confirmations confirmed
 # A slow emulator makes the system launcher show "not responding" dialogs over the app.
 adb shell settings put global hide_error_dialogs 1
 adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS
+# The head is held still (fixedHead): this emulator's rotation sensor jumps by over a radian
+# while idle. Real sensor tracking is therefore not covered here.
 # Pose the virtual phone upright in landscape.
 adb emu sensor set acceleration 9.81:0:0
 fail=0
@@ -20,7 +22,7 @@ wait_for() { # message, seconds
   echo "FAIL: $1"; fail=1; return 1
 }
 adb logcat -c
-adb shell am start -W -n $PKG/.xr.XrActivity
+adb shell am start -W -n $PKG/.xr.XrActivity --ez fixedHead true
 wait_for "First XR frame rendered" 60
 wait_for "Spatial surface nexus-1 ready" 30
 wait_for "Windows placed" 30
@@ -49,12 +51,12 @@ adb exec-out screencap -p > smoke/spatial-after-tap.png
 # Screens of other windows, for review.
 for apps in CENTER SETTINGS; do
   adb shell am force-stop $PKG
-  adb shell am start -W -n $PKG/.xr.XrActivity --es open $apps
+  adb shell am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --es open $apps
   sleep 25
   adb exec-out screencap -p > smoke/app-$(echo $apps | tr 'A-Z' 'a-z').png
 done
 adb shell am force-stop $PKG
-adb shell am start -W -n $PKG/.xr.XrActivity --ez headset true
+adb shell am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --ez headset true
 sleep 25
 adb exec-out screencap -p > smoke/headset.png
 adb shell am force-stop $PKG

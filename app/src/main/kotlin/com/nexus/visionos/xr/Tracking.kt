@@ -40,10 +40,13 @@ class HeadTracker(context: Context) : SensorEventListener {
     fun start() { sensor?.let { manager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) } }
     fun stop() { manager.unregisterListener(this) }
     fun recenter() { yawOffset = null }
-    val hasReading get() = device != null
+    val hasReading get() = fixed || device != null
+    /** For the emulator test only, whose virtual rotation sensor jumps while nothing moves. */
+    @Volatile var fixed = false
 
     /** Latest camera orientation. Without a sensor the view stays fixed and says so in Settings. */
     fun orientation(): Quat {
+        if (fixed) return Quat.IDENTITY
         val raw = device ?: return Quat.IDENTITY
         val camera = cameraOrientation(raw, displayDegrees)
         val offset = yawOffset ?: yawOf(camera).also { yawOffset = it }
