@@ -9,6 +9,9 @@ adb install -r --abi arm64-v8a dist/*.apk || exit 1
 adb root; sleep 3; adb wait-for-device
 adb shell pm grant $PKG android.permission.CAMERA
 adb shell settings put secure immersive_mode_confirmations confirmed
+# A slow emulator makes the system launcher show "not responding" dialogs over the app.
+adb shell settings put global hide_error_dialogs 1
+adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS
 # Pose the virtual phone upright in landscape.
 adb emu sensor set acceleration 9.81:0:0
 fail=0
