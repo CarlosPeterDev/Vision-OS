@@ -72,6 +72,9 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     private var voiceNotice = ""
     private var resumedAt = 0L
     private var placed = false
+    private var stillForward: Vec3? = null
+    private var stillSince = 0L
+    private var tracedAt = 0L
 
     private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         if (it) startCamera() else useVirtual(getString(R.string.camera_denied_virtual))
@@ -271,7 +274,9 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         // An open palm held up brings the home window in front of the user.
         if (palm.update(pointers.values.any { it.openPalm && !controller.isCapturing(it.handId) }, now)) {
             val existing = windows.find(AppType.HOME)
-            if (existing != null && !existing.minimized && kotlin.math.abs(existing.yaw - yawOf(orientation)) < 0.3f) {
+            if (existing != null && !existing.minimized && kotlin.math.abs(existing.yaw - yawOf(orientation)) < 0.3f &&
+                kotlin.math.abs(existing.pitch - pitchOf(orientation)) < 0.35f
+            ) {
                 windows.minimize(existing.id)
             } else {
                 open(AppType.HOME)
@@ -306,12 +311,30 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
      * is chosen after a short settle and the windows go exactly where the user is looking.
      */
     private fun placeWhenSettled(now: Long) {
-        if (placed || now - resumedAt < SETTLE_MS || !head.hasReading) return
+        traceHead(now)
+        if (placed || !head.hasReading) return
+        // Restart the still period whenever the view direction moves noticeably.
+        val forward = head.orientation().rotate(Vec3(0f, 0f, -1f))
+        val reference = stillForward
+        if (reference == null || (forward dot reference) < STILL_COS) {
+            stillForward = forward
+            stillSince = now
+        }
+        val waited = now - resumedAt
+        if (waited < SETTLE_MS || now - stillSince < STILL_MS && waited < MAX_SETTLE_MS) return
         placed = true
         head.recenter()
         val look = head.orientation()
         windows.arrange(yawOf(look), pitchOf(look))
         Log.i("NexusXR", "Windows placed at pitch %.2f".format(pitchOf(look)))
+    }
+
+    /** Logs the view direction for the first half minute, to diagnose sensor drift. */
+    private fun traceHead(now: Long) {
+        if (!head.hasReading || now - resumedAt > 30_000 || now - tracedAt < 3_000) return
+        tracedAt = now
+        val look = head.orientation()
+        Log.i("NexusXR", "Head yaw %.2f pitch %.2f".format(yawOf(look), pitchOf(look)))
     }
 
     private fun syncSurfaces() {
@@ -457,6 +480,9 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         const val EXTRA_HEADSET = "headset"
         private const val TOUCH_POINTER = 100
         private const val SETTLE_MS = 1500L
+        private const val STILL_MS = 1500L
+        private const val MAX_SETTLE_MS = 10_000L
+        private const val STILL_COS = 0.9986f // about 3 degrees
         private const val FIRST_FRAME_MS = 15_000L
         private const val PIXELS_PER_METRE = 760
     }
