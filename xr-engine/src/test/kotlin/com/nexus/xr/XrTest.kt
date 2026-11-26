@@ -388,4 +388,101 @@ class XrTest {
         assertFalse(small.state().contains("alpha"))
         assertTrue(WordSuggester("garbage\nx\ty").state().isEmpty())
     }
+
+    @Test fun thereAreOverFiftyOfflineCommandsAndEveryPhraseWorks() {
+        val c = VoiceCommands()
+        assertTrue(Act.entries.size > 50)
+        for (act in Act.entries) for (phrase in act.phrases) assertEquals(phrase, VoiceCommand.Do(act), c.parse(phrase))
+    }
+
+    @Test fun spokenTextKeepsTheUsersSpelling() {
+        val c = VoiceCommands()
+        assertEquals(VoiceCommand.Type("hello"), c.parse("type hello"))
+        assertEquals(VoiceCommand.Type("Hello World"), c.parse("Please, type Hello World."))
+        assertEquals(VoiceCommand.Type("أهلاً يا صاحبي"), c.parse("اكتب أهلاً يا صاحبي"))
+        assertEquals(VoiceCommand.Search("pizza near me"), c.parse("search for pizza near me"))
+        assertEquals(VoiceCommand.Search("مطاعم في المعادي"), c.parse("ابحث عن مطاعم في المعادي"))
+        assertEquals(VoiceCommand.GoTo("wikipedia dot org"), c.parse("go to wikipedia dot org"))
+        assertEquals(VoiceCommand.Do(Act.PAGE_TOP), c.parse("go to top"))
+        assertEquals(VoiceCommand.ClickLabel("Sign in"), c.parse("click on Sign in"))
+        assertEquals(VoiceCommand.Timer(5), c.parse("set a timer for 5 minutes"))
+        assertEquals(VoiceCommand.Timer(10), c.parse("مؤقت ١٠ دقايق"))
+        assertEquals(VoiceCommand.AddTask("buy milk"), c.parse("add task buy milk"))
+        assertEquals(VoiceCommand.Open(AppType.WEATHER), c.parse("open weather"))
+        assertNull(c.parse("type"))
+        assertNull(c.parse("what is the capital of France"))
+    }
+
+    @Test fun aiCanOnlyUseTheCommandList() {
+        val plan = AiControl.parse("DO: open browser\nDO: search for cats\nDO: format the phone\nSAY: Searching for cats.")
+        assertEquals(listOf(VoiceCommand.Open(AppType.BROWSER), VoiceCommand.Search("cats")), plan.steps)
+        assertEquals(listOf("format the phone"), plan.rejected)
+        assertEquals("Searching for cats.", plan.say)
+        val chat = AiControl.parse("open browser")
+        assertTrue(chat.steps.isEmpty())
+        assertEquals("open browser", chat.say)
+        assertEquals(AiControl.MAX_STEPS, AiControl.parse(List(20) { "DO: scroll down" }.joinToString("\n")).steps.size)
+        assertTrue(AiControl.needsConfirmation(VoiceCommand.CloseAll))
+        assertTrue(AiControl.needsConfirmation(VoiceCommand.ClickLabel("Pay now")))
+        assertTrue(AiControl.needsConfirmation(VoiceCommand.ClickLabel("ادفع")))
+        assertTrue(AiControl.needsConfirmation(VoiceCommand.Do(Act.CLICK)))
+        assertFalse(AiControl.needsConfirmation(VoiceCommand.ClickLabel("Images")))
+        assertFalse(AiControl.needsConfirmation(VoiceCommand.Search("cats")))
+        assertTrue(AiControl.systemPrompt(AppType.BROWSER).contains("scroll down"))
+    }
+
+    @Test fun unitConversions() {
+        fun unit(category: String, symbol: String) = Units.categories.getValue(category).first { it.symbol == symbol }
+        assertEquals(1000.0, Units.convert(1.0, unit("length", "km"), unit("length", "m")), 1e-9)
+        assertEquals(212.0, Units.convert(100.0, unit("temperature", "°C"), unit("temperature", "°F")), 1e-9)
+        assertEquals(273.15, Units.convert(32.0, unit("temperature", "°F"), unit("temperature", "K")), 1e-9)
+    }
+
+    @Test fun game2048MergesEachTileOnce() {
+        val game = Game2048(kotlin.random.Random(1))
+        game.load(intArrayOf(2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+        assertTrue(game.move(Slide.LEFT))
+        assertEquals(4, game.cells[0]); assertEquals(4, game.cells[1]); assertEquals(8, game.score)
+        game.load(intArrayOf(2, 4, 2, 4, 4, 2, 4, 2, 2, 4, 2, 4, 4, 2, 4, 2))
+        assertTrue(game.over()); assertFalse(game.move(Slide.UP))
+    }
+
+    @Test fun ticTacToeComputerNeverLosesAndTasksRoundTrip() {
+        fun play(board: CharArray) {
+            // The person tries every move; the computer answers with its best one.
+            for (i in 0..8) {
+                if (board[i] != ' ') continue
+                val next = board.copyOf().also { it[i] = 'X' }
+                assertNotEquals('X', TicTacToe.winner(next))
+                val reply = TicTacToe.bestMove(next, 'O')
+                if (reply < 0 || next.none { it == ' ' }) continue
+                next[reply] = 'O'
+                if (TicTacToe.winner(next) == null) play(next)
+            }
+        }
+        play(CharArray(9) { ' ' })
+        val decoded = TaskCodec.decode(TaskCodec.encode(listOf(Task("a\tb", true), Task("c"))))
+        assertEquals(listOf("a b", "c"), decoded.map { it.text }); assertTrue(decoded[0].done)
+    }
+
+    @Test fun freeResizeChangesWidthAndHeightSeparatelyAndIsRemembered() {
+        val manager = WindowManager()
+        val window = manager.open(AppType.NOTES, 0f)
+        val controller = InteractionController(manager, object : InteractionListener {
+            override fun onContentTouch(windowId: Int, action: TouchAction, u: Float, v: Float) {}
+            override fun onClosed(windowId: Int) {}
+        }).apply { freeResize = true }
+        val corner = controlLayout(window).first { it.region == Region.RESIZE }
+        fun aim(x: Float, y: Float) = window.point(x, y).let { Ray(Vec3(0f, 0f, 0f), it * (1f / it.length)) }
+        controller.handle(1, PointerPhase.DOWN, aim(corner.x, corner.y))
+        controller.handle(1, PointerPhase.MOVE, aim(corner.x + 0.1f, corner.y))
+        controller.handle(1, PointerPhase.UP, aim(corner.x + 0.1f, corner.y))
+        val wider = manager.get(window.id)!!
+        assertEquals(window.width + 0.2f, wider.width, 0.01f)
+        assertEquals(window.height, wider.height, 0.01f)
+        val back = LayoutCodec.decode(LayoutCodec.encode(manager.windows, 0f, 0f), 0f, 0f).single()
+        assertEquals(wider.width, back.width, 1e-4f)
+        val old = LayoutCodec.decode("NOTES,0.0,0.0,1.7,1.0,false", 0f, 0f).single()
+        assertEquals(0f, old.width, 0f)
+    }
 }

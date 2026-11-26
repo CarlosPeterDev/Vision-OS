@@ -210,4 +210,114 @@
     <string name="listening">Listening…</string>
     <string name="clear_words">Forget learned words</string>
     <string name="words_cleared">Learned words deleted</string>
+    <string name="app_tasks">Tasks</string>
+    <string name="app_calendar">Calendar</string>
+    <string name="app_paint">Paint</string>
+    <string name="app_converter">Converter</string>
+    <string name="app_games">Games</string>
+    <string name="app_weather">Weather</string>
+    <string name="app_voice">Voice</string>
+    <string name="no_offline_recognizer">This phone has no offline speech recognizer. To use voice control anyway, turn off “Offline only” in Settings; the phone’s speech service may then use the internet.</string>
+    <string name="no_language_pack">The speech language pack is missing. Download it in the phone’s speech or voice input settings.</string>
+    <string name="listening_on_device">Listening (offline)</string>
+    <string name="listening_system">Listening (phone speech service)</string>
+    <string name="has_offline_recognizer">This phone has an offline recognizer. A language pack may still be needed.</string>
+    <string name="lacks_offline_recognizer">This phone does not report an offline recognizer.</string>
+    <string name="voice_start">Start voice control</string>
+    <string name="voice_stop">Stop listening</string>
+    <string name="voice_off">Voice control is off</string>
+    <string name="confirm_needed">“%1$s” needs your OK. Say confirm or cancel.</string>
+    <string name="cancelled">Cancelled</string>
+    <string name="not_possible">✗ “%1$s” is not possible here. For typing, tap a text field first.</string>
+    <string name="not_a_command">Not a command: “%1$s”</string>
+    <string name="no_ai_model">“%1$s” is not a built-in command. Add an AI model on the start screen to handle free requests.</string>
+    <string name="ai_thinking">AI is working on: %1$s</string>
+    <string name="ai_timeout">The AI model did not answer in time</string>
+    <string name="ai_nothing">The AI model gave no usable step</string>
+    <string name="ai_confirm">The AI wants to: %1$s. Say confirm or cancel.</string>
+    <string name="label_not_found">No button called “%1$s” here</string>
+    <string name="imported">Imported %1$d of %2$d files</string>
+    <string name="gpu_failed">GPU hand tracking crashed last time, so it was turned off</string>
+    <string name="my_files">My files</string>
+    <string name="phone_folder">Phone folder</string>
+    <string name="import_files">Import</string>
+    <string name="my_files_note">Copies kept inside this app. Uninstalling the app deletes them.</string>
+    <string name="my_files_empty">No files yet. Press Import to add pictures, videos, music, PDF or text files.</string>
+    <string name="save_close">Save and close</string>
+    <string name="export_copy">Save a copy to Downloads</string>
+    <string name="exported">Saved to Downloads</string>
+    <string name="export_failed">Could not save the copy</string>
+    <string name="delete_file">Delete from My files</string>
+    <string name="delete_file_confirm">Press again to delete</string>
+    <string name="working">Working…</string>
+    <string name="no_history">No history yet</string>
+    <string name="task_hint">New task</string>
+    <string name="tasks_empty">No tasks. Type one, or say “add task …”.</string>
+    <string name="drawing_saved">Drawing saved to the gallery</string>
+    <string name="score">Score %1$d · Best %2$d</string>
+    <string name="game_over">Game over</string>
+    <string name="you_win">You win</string>
+    <string name="phone_wins">The phone wins</string>
+    <string name="draw_game">Draw</string>
+    <string name="your_turn">Your turn (X)</string>
+    <string name="city_hint">City name</string>
+    <string name="city_not_found">City not found</string>
+    <string name="weather_failed">Could not get the weather. Check the internet connection.</string>
+    <string name="weather_now">Now %1$.1f °C · humidity %2$d%% · wind %3$.0f km/h</string>
+    <string name="weather_note">Weather data by Open-Meteo.com (free for non-commercial use). The city name is sent to their server.</string>
+    <string name="voice_text_commands">With text:\n• type …\n• search for …\n• go to …\n• click …\n• set timer for 5 minutes\n• add task …\nAnything else goes to the AI model.</string>
+    <string name="voice_app_commands">Also: open/close (any app), close all, recenter, arrange, cinema, take photo, exit.</string>
+    <string name="voice_auto">Start with spatial mode</string>
+    <string name="voice_language">Language</string>
+    <string name="voice_offline_only">Offline only</string>
+    <string name="voice_wake">Say “Nexus” first</string>
+    <string name="voice_ai">Other speech to AI</string>
+    <string name="voice_privacy">Commands work without the internet. With “Other speech to AI” on, the words of a sentence that is not a command are sent as text to the AI provider you set up.</string>
+    <string name="voice_command_list">All voice commands</string>
+    <string name="section_windows">Windows and hands</string>
+    <string name="free_resize">Free width and height</string>
+    <string name="palm_shortcuts">Palm shortcuts</string>
+    <string name="status_line">Status on Home</string>
+    <string name="window_distance">Window distance</string>
+    <string name="text_size">Text size</string>
+    <string name="cursor_size">Pointer size</string>
+    <string name="long_press_time">Long press after</string>
+    <string name="size_buttons_note">Drag a window’s lower right corner to change its size. Text size applies to windows opened afterwards.</string>
+    <string name="gpu_tracking">GPU hand tracking (try it)</string>
+    <string name="restart_needed">Exit and open spatial mode again to apply</string>
+    <string name="search_engine">Search</string>
+    <string name="restore_tabs">Reopen tabs</string>
+    <string name="save_history">Save history</string>
+    <string name="desktop_sites">Desktop sites</string>
+    <string name="third_party_cookies">Third-party cookies</string>
+    <string name="web_text_size">Web text size</string>
+    <string name="browser_data_note">Website sign-ins stay saved on this phone. Some companies, including Google, may refuse sign-in inside a built-in browser. Changes apply to new browser windows.</string>
+    <string name="section_data">Your data</string>
+    <string name="clear_history">Clear history</string>
+    <string name="sign_out_all">Sign out of all sites</string>
+    <string name="reset_settings">Reset settings</string>
+    <string name="press_again">Press again to confirm</string>
+    <string name="cleared">Done</string>
+    <string-array name="voice_languages">
+        <item>Phone</item>
+        <item>English</item>
+        <item>Arabic</item>
+    </string-array>
+    <string-array name="converter_categories">
+        <item>Length</item>
+        <item>Weight</item>
+        <item>Data</item>
+        <item>Speed</item>
+        <item>Area</item>
+        <item>Temperature</item>
+    </string-array>
+    <string-array name="command_groups">
+        <item>Windows</item>
+        <item>Pointing and scrolling</item>
+        <item>Typing</item>
+        <item>Browser</item>
+        <item>Media and sound</item>
+        <item>View</item>
+        <item>System</item>
+    </string-array>
 </resources>

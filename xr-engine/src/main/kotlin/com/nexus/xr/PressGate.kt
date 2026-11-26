@@ -15,7 +15,10 @@ data class PressEvent(val action: PressAction, val x: Float, val y: Float)
  * Held time only grows from [move] calls, and one gap adds at most [maxStepMs]. A frame that
  * arrives late because the phone lagged therefore cannot turn a tap into a long press.
  */
-class PressGate(private val slop: Float, private val longPressMs: Long = 2000, private val maxStepMs: Long = 250) {
+class PressGate(private val slop: Float, longPressMs: Long = 2000, private val maxStepMs: Long = 250) {
+    /** Adjustable in Settings; never shorter than Android users expect. */
+    var longPressMs = longPressMs
+
     private enum class State { IDLE, PENDING, DRAGGING, LONG }
 
     private var state = State.IDLE

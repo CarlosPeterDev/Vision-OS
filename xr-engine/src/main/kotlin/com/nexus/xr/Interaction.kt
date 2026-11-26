@@ -27,6 +27,10 @@ class InteractionController(private val windows: WindowManager, private val list
         override val windowId: Int, val yawOffset: Float, val pitchOffset: Float, val startYaw: Float, val startPitch: Float
     ) : Capture
     private data class Resize(override val windowId: Int, val startRadius: Float, val startScale: Float) : Capture
+    /** Free resize: the corner follows the ray, so width and height change separately. */
+    private data class Stretch(
+        override val windowId: Int, val startX: Float, val startY: Float, val startWidth: Float, val startHeight: Float
+    ) : Capture
     private data class Button(override val windowId: Int, val region: Region) : Capture
     private data class TwoHand(override val windowId: Int, val startSeparation: Float, val startScale: Float) : Capture
 
@@ -35,7 +39,11 @@ class InteractionController(private val windows: WindowManager, private val list
 
     private val hovers = mutableMapOf<Int, Hit>()
 
+    /** When set, the resize corner changes width and height independently. */
+    var freeResize = false
+
     fun isCapturing(pointer: Int) = pointer in captures
+    fun isHeld(windowId: Int) = captures.values.any { it.windowId == windowId }
 
     /** What each free pointer is aiming at, for highlighting. */
     fun hovered(): Collection<Hit> = hovers.values
@@ -83,7 +91,11 @@ class InteractionController(private val windows: WindowManager, private val list
                 Content(win.id, hit.u, hit.v)
             }
             Region.TITLE, Region.GRAB -> Drag(win.id, wrap(win.yaw - yaw(ray)), win.pitch - pitch(ray), win.yaw, win.pitch)
-            Region.RESIZE -> Resize(win.id, radius(ray, win).coerceAtLeast(0.05f), win.scale)
+            Region.RESIZE -> {
+                val point = if (freeResize) planeHit(ray, win) else null
+                if (point != null) Stretch(win.id, point.second, point.third, win.width, win.height)
+                else Resize(win.id, radius(ray, win).coerceAtLeast(0.05f), win.scale)
+            }
             else -> Button(win.id, hit.region)
         }
     }
@@ -105,6 +117,16 @@ class InteractionController(private val windows: WindowManager, private val list
                     pitch = (pitch(ray) + capture.pitchOffset).coerceIn(-1.1f, 1.1f)
                 )
             )
+            is Stretch -> {
+                val (_, x, y) = planeHit(ray, win) ?: return
+                // The window grows around its centre, so each edge moves with the corner.
+                windows.replace(
+                    win.copy(
+                        width = side(capture.startWidth + 2 * (x - capture.startX) / win.scale),
+                        height = side(capture.startHeight - 2 * (y - capture.startY) / win.scale)
+                    )
+                )
+            }
             is Resize -> windows.replace(win.copy(scale = clampScale(capture.startScale * radius(ray, win) / capture.startRadius)))
             is TwoHand -> {
                 val others = captures.filter { it.value === capture }.keys.mapNotNull { rays[it] }
@@ -131,6 +153,10 @@ class InteractionController(private val windows: WindowManager, private val list
             is Drag -> windows.get(capture.windowId)?.let {
                 if (!cancelled && abs(wrap(it.yaw - capture.startYaw)) + abs(it.pitch - capture.startPitch) > 0.08f)
                     listener.onAdjusted(Region.GRAB)
+            }
+            is Stretch -> windows.get(capture.windowId)?.let {
+                if (!cancelled && abs(it.width - capture.startWidth) + abs(it.height - capture.startHeight) > 0.08f)
+                    listener.onAdjusted(Region.RESIZE)
             }
             is Resize -> windows.get(capture.windowId)?.let {
                 if (!cancelled && abs(it.scale - capture.startScale) > 0.08f) listener.onAdjusted(Region.RESIZE)
@@ -165,5 +191,6 @@ class InteractionController(private val windows: WindowManager, private val list
     private fun wrap(a: Float) = atan2(sin(a), cos(a))
     private fun separation(a: Ray, b: Ray) = (a.direction - b.direction).length
     private fun radius(r: Ray, w: SpatialWindow) = planeHit(r, w)?.let { hypot(it.second, it.third) } ?: 0f
+    private fun side(s: Float) = s.coerceIn(SpatialWindow.MIN_SIDE, SpatialWindow.MAX_SIDE)
     private fun clampScale(s: Float) = s.coerceIn(SpatialWindow.MIN_SCALE, SpatialWindow.MAX_SCALE)
 }

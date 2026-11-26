@@ -56,6 +56,7 @@ class Scene(
     val lensShift: Float = 0f,
     val lensHeight: Float = 0f,
     val lensZoom: Float = 1f,
+    val cursorScale: Float = 1f,
     val lensGrid: Boolean = false
 )
 
@@ -110,7 +111,7 @@ class XrRenderer(
         }
     }
 
-    private class WindowSlot(val width: Int, val height: Int, val onSurface: (Surface) -> Unit) { var external: External? = null }
+    private class WindowSlot(var width: Int, var height: Int, val onSurface: (Surface) -> Unit) { var external: External? = null }
     private class Title(val key: String, val texture: Int, val width: Int)
     private class Target(val fbo: Int, val texture: Int, val width: Int, val height: Int)
 
@@ -159,6 +160,16 @@ class XrRenderer(
         val slot = WindowSlot(w, h, onSurface)
         slots[id] = slot
         if (ready) attach(slot)
+    }
+
+    /** Changes the buffer size of a window's texture. [then] runs on the main thread afterwards. */
+    fun resizeWindow(id: Int, w: Int, h: Int, then: () -> Unit) = view.queueEvent {
+        slots[id]?.let {
+            it.width = w
+            it.height = h
+            it.external?.surfaceTexture?.setDefaultBufferSize(w, h)
+        }
+        postToMain(then)
     }
 
     fun destroyWindow(id: Int) = view.queueEvent {
@@ -399,7 +410,7 @@ class XrRenderer(
             val p = cursor.position
             val right = q.rotate(Vec3(1f, 0f, 0f))
             val up = q.rotate(Vec3(0f, 1f, 0f))
-            val size = p.length * if (cursor.pinched) 0.017f else 0.024f
+            val size = p.length * s.cursorScale * if (cursor.pinched) 0.017f else 0.024f
             ringProgram.use()
             ringProgram.set("uFill", if (cursor.pinched) 1f else 0f)
             ringProgram.set("uProgress", cursor.progress)

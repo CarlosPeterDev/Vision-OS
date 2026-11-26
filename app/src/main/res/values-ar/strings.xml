@@ -210,4 +210,114 @@
     <string name="listening">بسمعك…</string>
     <string name="clear_words">امسح الكلمات المحفوظة</string>
     <string name="words_cleared">الكلمات المحفوظة اتمسحت</string>
+    <string name="app_tasks">المهام</string>
+    <string name="app_calendar">التقويم</string>
+    <string name="app_paint">الرسم</string>
+    <string name="app_converter">المحول</string>
+    <string name="app_games">الألعاب</string>
+    <string name="app_weather">الطقس</string>
+    <string name="app_voice">الصوت</string>
+    <string name="no_offline_recognizer">الموبايل ده مفيهوش تعرف على الكلام من غير نت. علشان تستخدم التحكم الصوتي، اقفل «من غير نت بس» من الإعدادات؛ وساعتها خدمة الصوت ممكن تستخدم الإنترنت.</string>
+    <string name="no_language_pack">حزمة لغة التعرف على الكلام مش موجودة. نزلها من إعدادات الإدخال الصوتي في الموبايل.</string>
+    <string name="listening_on_device">بسمعك (من غير نت)</string>
+    <string name="listening_system">بسمعك (خدمة الصوت في الموبايل)</string>
+    <string name="has_offline_recognizer">الموبايل فيه تعرف على الكلام من غير نت. ممكن تحتاج تنزل حزمة اللغة.</string>
+    <string name="lacks_offline_recognizer">الموبايل مش بيقول إن عنده تعرف على الكلام من غير نت.</string>
+    <string name="voice_start">شغّل التحكم الصوتي</string>
+    <string name="voice_stop">وقف السمع</string>
+    <string name="voice_off">التحكم الصوتي اتقفل</string>
+    <string name="confirm_needed">«%1$s» محتاج موافقتك. قول تأكيد أو إلغاء.</string>
+    <string name="cancelled">اتلغى</string>
+    <string name="not_possible">✗ «%1$s» مش هينفع هنا. علشان تكتب، دوس على خانة كتابة الأول.</string>
+    <string name="not_a_command">ده مش أمر: «%1$s»</string>
+    <string name="no_ai_model">«%1$s» مش من الأوامر الجاهزة. ضيف نموذج ذكاء اصطناعي من شاشة البداية علشان يتعامل مع الطلبات الحرة.</string>
+    <string name="ai_thinking">الذكاء الاصطناعي بيشتغل على: %1$s</string>
+    <string name="ai_timeout">النموذج اتأخر في الرد</string>
+    <string name="ai_nothing">النموذج ماداش خطوة تنفع</string>
+    <string name="ai_confirm">الذكاء الاصطناعي عايز: %1$s. قول تأكيد أو إلغاء.</string>
+    <string name="label_not_found">مفيش زرار اسمه «%1$s» هنا</string>
+    <string name="imported">اتضاف %1$d من %2$d ملف</string>
+    <string name="gpu_failed">تتبع الإيد بالـ GPU وقع المرة اللي فاتت فاتقفل</string>
+    <string name="my_files">ملفاتي</string>
+    <string name="phone_folder">فولدر الموبايل</string>
+    <string name="import_files">استيراد</string>
+    <string name="my_files_note">نسخ محفوظة جوه التطبيق. لو مسحت التطبيق هتتمسح.</string>
+    <string name="my_files_empty">مفيش ملفات لسه. دوس استيراد علشان تضيف صور أو فيديو أو أغاني أو PDF أو ملفات نصية.</string>
+    <string name="save_close">حفظ وإغلاق</string>
+    <string name="export_copy">احفظ نسخة في التنزيلات</string>
+    <string name="exported">اتحفظت في التنزيلات</string>
+    <string name="export_failed">ما قدرتش أحفظ النسخة</string>
+    <string name="delete_file">امسح من ملفاتي</string>
+    <string name="delete_file_confirm">دوس تاني علشان تمسح</string>
+    <string name="working">لحظة…</string>
+    <string name="no_history">مفيش سجل لسه</string>
+    <string name="task_hint">مهمة جديدة</string>
+    <string name="tasks_empty">مفيش مهام. اكتب واحدة، أو قول «ضيف مهمة …».</string>
+    <string name="drawing_saved">الرسمة اتحفظت في المعرض</string>
+    <string name="score">النقط %1$d · الأحسن %2$d</string>
+    <string name="game_over">خلصت اللعبة</string>
+    <string name="you_win">إنت كسبت</string>
+    <string name="phone_wins">الموبايل كسب</string>
+    <string name="draw_game">تعادل</string>
+    <string name="your_turn">دورك (X)</string>
+    <string name="city_hint">اسم المدينة</string>
+    <string name="city_not_found">المدينة مش موجودة</string>
+    <string name="weather_failed">ما قدرتش أجيب الطقس. اتأكد من النت.</string>
+    <string name="weather_now">دلوقتي %1$.1f °C · رطوبة %2$d%% · رياح %3$.0f كم/س</string>
+    <string name="weather_note">بيانات الطقس من Open-Meteo.com (مجانية للاستخدام غير التجاري). اسم المدينة بيتبعت للسيرفر بتاعهم.</string>
+    <string name="voice_text_commands">أوامر بكلام:\n• اكتب …\n• ابحث عن …\n• روح على موقع …\n• اضغط على …\n• مؤقت ٥ دقايق\n• ضيف مهمة …\nأي حاجة تانية بتروح للذكاء الاصطناعي.</string>
+    <string name="voice_app_commands">وكمان: افتح/اقفل (أي تطبيق)، اقفل الكل، وسط العرض، رتب، سينما، صور، خروج.</string>
+    <string name="voice_auto">يشتغل مع الوضع المكاني</string>
+    <string name="voice_language">اللغة</string>
+    <string name="voice_offline_only">من غير نت بس</string>
+    <string name="voice_wake">قول «نكسس» الأول</string>
+    <string name="voice_ai">باقي الكلام للـ AI</string>
+    <string name="voice_privacy">الأوامر بتشتغل من غير نت. لو «باقي الكلام للـ AI» شغالة، الجملة اللي مش أمر بتتبعت كنص لمزود الذكاء الاصطناعي اللي إنت ضبطته.</string>
+    <string name="voice_command_list">كل الأوامر الصوتية</string>
+    <string name="section_windows">النوافذ والإيد</string>
+    <string name="free_resize">طول وعرض بحرية</string>
+    <string name="palm_shortcuts">اختصارات كف الإيد</string>
+    <string name="status_line">الحالة في الرئيسية</string>
+    <string name="window_distance">بُعد النوافذ</string>
+    <string name="text_size">حجم الكلام</string>
+    <string name="cursor_size">حجم المؤشر</string>
+    <string name="long_press_time">الضغطة الطويلة بعد</string>
+    <string name="size_buttons_note">اسحب الركن اللي تحت على اليمين علشان تغير حجم النافذة. حجم الكلام بيتطبق على النوافذ اللي تفتحها بعد كده.</string>
+    <string name="gpu_tracking">تتبع الإيد بالـ GPU (جربه)</string>
+    <string name="restart_needed">اخرج وافتح الوضع المكاني تاني علشان يتطبق</string>
+    <string name="search_engine">البحث</string>
+    <string name="restore_tabs">افتح التبويبات تاني</string>
+    <string name="save_history">احفظ السجل</string>
+    <string name="desktop_sites">مواقع الكمبيوتر</string>
+    <string name="third_party_cookies">كوكيز الطرف التالت</string>
+    <string name="web_text_size">حجم كلام المواقع</string>
+    <string name="browser_data_note">تسجيل الدخول في المواقع بيفضل محفوظ على الموبايل. بعض الشركات، منها جوجل، ممكن ترفض تسجيل الدخول جوه متصفح مدمج. التغييرات بتتطبق على نوافذ المتصفح الجديدة.</string>
+    <string name="section_data">بياناتك</string>
+    <string name="clear_history">امسح السجل</string>
+    <string name="sign_out_all">اخرج من كل المواقع</string>
+    <string name="reset_settings">رجّع الإعدادات</string>
+    <string name="press_again">دوس تاني للتأكيد</string>
+    <string name="cleared">تم</string>
+    <string-array name="voice_languages">
+        <item>لغة الموبايل</item>
+        <item>إنجليزي</item>
+        <item>عربي</item>
+    </string-array>
+    <string-array name="converter_categories">
+        <item>الطول</item>
+        <item>الوزن</item>
+        <item>البيانات</item>
+        <item>السرعة</item>
+        <item>المساحة</item>
+        <item>الحرارة</item>
+    </string-array>
+    <string-array name="command_groups">
+        <item>النوافذ</item>
+        <item>الضغط والتمرير</item>
+        <item>الكتابة</item>
+        <item>المتصفح</item>
+        <item>الوسائط والصوت</item>
+        <item>العرض</item>
+        <item>النظام</item>
+    </string-array>
 </resources>

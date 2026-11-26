@@ -17,6 +17,13 @@ import android.graphics.Color
 import android.hardware.display.DisplayManager
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.ToneGenerator
+import android.view.KeyEvent
+import com.nexus.visionos.SystemStt
+import com.nexus.voice.Language
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import android.net.Uri
 import android.opengl.GLSurfaceView
 import android.os.BatteryManager
@@ -71,6 +78,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
 
     private var stereo = false
     private var lensGridUntil = 0L
+    /** Saving a picture or video can hold up the GPU for a moment on slow phones. */
+    private var captureGraceUntil = 0L
     private var calibration: Calibration? = null
     private var lastStepMs = 0L
     private var loggedLevel = 0
@@ -121,6 +130,32 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     private var dictation: Job? = null
     private var recording: VideoCapture? = null
     private lateinit var recordingBadge: TextView
+    private lateinit var listeningBadge: TextView
+    private var voiceControl: VoiceControl? = null
+    private var voiceMessage = ""
+    private var resumeListening = false
+    /** Steps the AI still wants to run once the user approves the one being asked about. */
+    private var aiHeld: VoiceCommand? = null
+    private var aiRest = emptyList<VoiceCommand>()
+    private var timerEnd = 0L
+    private var aimRay: Ray? = null
+    private val resizing = HashSet<Int>()
+    private val offlineStt by lazy { SystemStt(applicationContext, offline = true) { settings.voiceOfflineOnly } }
+    private val voicePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        if (it) startListening()
+    }
+    private val importPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isEmpty()) return@registerForActivityResult
+        showHud(getString(R.string.working), SystemClock.uptimeMillis() + 60_000)
+        io.execute {
+            val added = uris.count { Imports.add(applicationContext, it) }
+            runOnUiThread {
+                library++
+                Log.i("NexusXR", "Imported $added of ${uris.size}")
+                showHud(getString(R.string.imported, added, uris.size), SystemClock.uptimeMillis() + 3500)
+            }
+        }
+    }
     private val commands = VoiceCommands()
     private val io = java.util.concurrent.Executors.newSingleThreadExecutor()
 
@@ -148,7 +183,11 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         head = HeadTracker(this)
         head.fixed = intent.getBooleanExtra("fixedHead", false)
         if (head.fixed) Log.i("NexusXR", "Head tracking held still for testing")
-        hands = HandTracker(this)
+        hands = HandTracker(this, settings.gpuTracking)
+        if (hands.gpuCrashed) {
+            settings.gpuTracking = false
+            voiceNotice = getString(R.string.gpu_failed)
+        }
         camera = CameraFeed(this, hands)
         cameraFov = camera.verticalFov()
         voice = VoiceStack(this, lifecycleScope) { feature, e -> voiceNotice = "$feature → Android: ${e.message}" }
@@ -185,8 +224,17 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             setPadding(32, 14, 32, 14)
             visibility = View.GONE
         }
+        listeningBadge = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            maxLines = 2
+            background = LiquidGlass(0x5A35B5, 0xD0, 0xCC)
+            setPadding(32, 14, 32, 14)
+            visibility = View.GONE
+        }
         setContentView(FrameLayout(this).apply {
             addView(gl)
+            addView(listeningBadge, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START).apply { bottomMargin = 24; marginStart = 24 })
             addView(recordingBadge, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = 24 })
             addView(hud, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = 24 })
             addView(warning)
@@ -214,9 +262,17 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             else cameraPermission.launch(Manifest.permission.CAMERA)
         }
         Choreographer.getInstance().postFrameCallback(frame)
+        if (resumeListening) {
+            resumeListening = false
+            startListening()
+        }
     }
 
     override fun onPause() {
+        // The microphone is never used while spatial mode is off the screen.
+        resumeListening = voiceControl?.active == true
+        stopListening()
+        surfaces.values.forEach { it.flush() }
         // The encoder must be detached while the GL thread still runs.
         stopRecording(wait = true)
         dictation?.cancel()
@@ -305,6 +361,9 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         // A slow phone gets fewer effects.
         val level = governor.update(renderer.fps, now)
         Motion.level = level
+        windows.defaultDistance = settings.windowDistance
+        controller.freeResize = settings.freeResize
+        if (timerEnd != 0L && SystemClock.elapsedRealtime() >= timerEnd) ring()
         if (level != loggedLevel) {
             loggedLevel = level
             Log.i("NexusXR", "Performance level $level at ${renderer.fps} FPS")
@@ -314,7 +373,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         hands.swapSides = settings.swapHandSides
         val passthrough = settings.passthrough
         val lastFrame = renderer.lastCameraFrameMs
-        if (passthrough && cameraRunning && now - maxOf(lastFrame, cameraStartedAt) > if (lastFrame < cameraStartedAt) FIRST_FRAME_MS else 1500) {
+        if (passthrough && cameraRunning && now - maxOf(lastFrame, cameraStartedAt) > if (lastFrame < cameraStartedAt) FIRST_FRAME_MS else if (recording != null || now < captureGraceUntil) 6000 else 1500) {
             halt(getString(R.string.camera_stalled))
         }
 
@@ -386,8 +445,11 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
 
         // An open hand turned away shows Home; turned towards the face it opens the quick menu.
         val free = pointers.values.filter { it.openPalm && !controller.isCapturing(it.handId) }
-        if (palm.update(free.any { !it.palmToUser }, now)) toggleInFront(AppType.HOME, orientation)
-        if (menuPalm.update(free.any { it.palmToUser }, now)) toggleInFront(AppType.CENTER, orientation)
+        val shortcuts = settings.palmShortcuts
+        if (palm.update(shortcuts && free.any { !it.palmToUser }, now)) toggleInFront(AppType.HOME, orientation)
+        if (menuPalm.update(shortcuts && free.any { it.palmToUser }, now)) toggleInFront(AppType.CENTER, orientation)
+        // Where a spoken "click" lands: the hand's cursor if there is one, else the middle of the view.
+        aimRay = pointers.keys.firstOrNull()?.let { aims[it] }?.let { viewportRay(orientation, it.x, it.y, fov, aspect) } ?: centreRay
 
         val cursors = pointers.values.map { p ->
             val aim = aims[p.handId] ?: toViewport(p.position, latest?.aspect ?: 4f / 3f)
@@ -409,6 +471,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             focusedId = windows.focused?.id ?: -1,
             highlights = highlighted,
             cursors = cursors,
+            cursorScale = settings.cursorSize,
             hands = if (settings.showHands && level < PerformanceGovernor.MAX_LEVEL) shapes else emptyList(),
             handShapes = shapes,
             occlusion = settings.occlusion && level < PerformanceGovernor.MAX_LEVEL,
@@ -519,6 +582,13 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             windows.find(AppType.HOME)?.let { windows.focus(it.id) }
         }
         Log.i("NexusXR", "Windows placed at pitch %.2f".format(pitchOf(look)))
+        if (settings.voiceAutoStart) startListening()
+        // Test hook: run spoken sentences through the same path the microphone uses.
+        intent.getStringExtra("say")?.let { script ->
+            script.split('|').forEachIndexed { i, sentence ->
+                gl.postDelayed({ lifecycleScope.launch { heard(sentence.trim()) } }, 8_000L + i * 7_000L)
+            }
+        }
     }
 
     /** Logs the view direction for the first half minute, to diagnose sensor drift. */
@@ -535,10 +605,25 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         surfaces.keys.filter { it !in alive && !animator.isVisible(it) }
             .forEach { id -> surfaces.remove(id)?.release(); renderer.destroyWindow(id) }
         for (win in windows.windows) {
+            surfaces[win.id]?.let { surface ->
+                val w = (win.width * PIXELS_PER_METRE).toInt()
+                val h = (win.height * PIXELS_PER_METRE).toInt()
+                // Reshaped once the corner is let go, so the content is laid out only once.
+                if ((kotlin.math.abs(w - surface.width) > 12 || kotlin.math.abs(h - surface.height) > 12) &&
+                    !controller.isHeld(win.id) && resizing.add(win.id)
+                ) {
+                    renderer.resizeWindow(win.id, w, h) {
+                        if (surfaces[win.id] === surface) surface.resize(w, h) {}
+                        resizing.remove(win.id)
+                    }
+                }
+            }
             if (win.id in surfaces) continue
             val width = (win.width * PIXELS_PER_METRE).toInt()
             val height = (win.height * PIXELS_PER_METRE).toInt()
-            val surface = SpatialSurface(this, "nexus-${win.id}", width, height, { feedback.hover() }) { buildApp(it, win.app, this) }
+            val surface = SpatialSurface(
+                this, "nexus-${win.id}", width, height, settings.textScale, { settings.longPressMs.toLong() }, { feedback.hover() }
+            ) { buildApp(it, win.app, this) }
             surfaces[win.id] = surface
             renderer.createWindow(win.id, width, height) { target ->
                 if (surfaces[win.id] === surface) surface.attach(target)
@@ -573,6 +658,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         val audio = getSystemService(AudioManager::class.java)
         if (audio.requestAudioFocus(audioFocus) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) return
         voiceNotice = ""
+        stopListening()
         dictation?.cancel()
         voice.engine.start(voice.settings.selectedLanguage).invokeOnCompletion { audio.abandonAudioFocusRequest(audioFocus) }
     }
@@ -659,6 +745,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             dictationPermission.launch(Manifest.permission.RECORD_AUDIO)
             return
         }
+        stopListening()
         val field = windows.focused?.id ?: return
         voice.engine.cancel() // one user of the microphone at a time
         val audio = getSystemService(AudioManager::class.java)
@@ -688,6 +775,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
 
     override fun capturePhoto() {
         feedback.click()
+        captureGraceUntil = SystemClock.uptimeMillis() + 8000
         renderer.requestPhoto { pixels, w, h ->
             io.execute {
                 val saved = savePhoto(applicationContext, pixels, w, h)
@@ -731,30 +819,181 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
 
     private fun finishRecording(capture: VideoCapture) {
         val saved = capture.finish()
+        captureGraceUntil = SystemClock.uptimeMillis() + 8000
         library++
         Log.i("NexusXR", if (saved) "Recording saved" else "Recording failed")
         showHud(getString(if (saved) R.string.video_saved else R.string.capture_failed), SystemClock.uptimeMillis() + 3000)
     }
 
-    /** Recognised commands are carried out here; anything else goes to the AI model. */
-    private fun onSpeech(sentence: String): String? {
-        val result = commands.handle(sentence, SystemClock.uptimeMillis()) ?: return null
-        val arabic = sentence.any { it in '\u0600'..'\u06FF' }
-        fun say(english: String, arabicText: String) = if (arabic) arabicText else english
-        return when (result) {
-            is CommandResult.AskToConfirm -> say("That closes things. Say confirm to continue, or cancel.", "ده هيقفل حاجات. قول تأكيد علشان أكمل، أو إلغاء.")
-            CommandResult.Cancelled -> say("Cancelled.", "تمام، لغيت.")
-            is CommandResult.Run -> {
-                run(result.command)
-                say("Done.", "تمام.")
+    // ---- Voice ----
+
+    override fun toggleVoiceControl() {
+        if (voiceControl?.active == true) {
+            stopListening()
+            showHud(getString(R.string.voice_off), SystemClock.uptimeMillis() + 2500)
+        } else startListening()
+    }
+
+    private fun startListening() {
+        if (voiceControl?.active == true) return
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            voicePermission.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        // Only one user of the microphone at a time.
+        dictation?.cancel()
+        voice.engine.cancel()
+        val control = VoiceControl(
+            lifecycleScope, offlineStt,
+            { when (settings.voiceLanguage) { 1 -> Language.ENGLISH; 2 -> Language.ARABIC; else -> null } },
+            { words -> showListening(words) },
+            { sentence -> heard(sentence) },
+            { reason ->
+                voiceMessage = reason
+                listeningBadge.visibility = View.GONE
+                Log.w("NexusXR", "Voice control stopped: $reason")
+                showHud(reason, SystemClock.uptimeMillis() + 8000)
             }
+        )
+        voiceControl = control
+        voiceMessage = ""
+        control.start()
+        showListening("")
+        Log.i("NexusXR", "Voice control on")
+    }
+
+    private fun stopListening() {
+        voiceControl?.stop()
+        voiceControl = null
+        listeningBadge.visibility = View.GONE
+    }
+
+    /** Always on screen while the microphone is in use, and says who is doing the recognising. */
+    private fun showListening(words: String) {
+        if (voiceControl?.active != true) return
+        val engine = getString(if (offlineStt.hasOnDevice) R.string.listening_on_device else R.string.listening_system)
+        listeningBadge.text = "● $engine" + if (words.isEmpty()) "" else "\n$words"
+        listeningBadge.visibility = View.VISIBLE
+    }
+
+    override fun isListening() = voiceControl?.active == true
+
+    override fun voiceControlState(): String {
+        val engine = getString(if (offlineStt.hasOnDevice) R.string.has_offline_recognizer else R.string.lacks_offline_recognizer)
+        return if (voiceMessage.isEmpty()) engine else "$engine\n$voiceMessage"
+    }
+
+    private fun say(message: String, millis: Long = 3500) {
+        voiceMessage = message
+        showHud(message, SystemClock.uptimeMillis() + millis)
+    }
+
+    /** One sentence from hands-free listening: a built-in command first, otherwise the AI model. */
+    private suspend fun heard(sentence: String) {
+        var text = sentence.trim()
+        if (settings.wakeWord) {
+            if (VoiceCommands.normalize(text.substringBefore(' ')) !in WAKE_WORDS) return
+            text = text.substringAfter(' ', "").trim()
+        }
+        if (text.isEmpty()) return
+        val result = commands.handle(text, SystemClock.uptimeMillis())
+        // The sentence itself is not logged: it may be something private being typed.
+        Log.i("NexusXR", "Heard a " + if (result == null) "request for the AI model" else "built-in command")
+        val held = aiHeld
+        val rest = aiRest
+        aiHeld = null
+        aiRest = emptyList()
+        when (result) {
+            is CommandResult.AskToConfirm -> say(getString(R.string.confirm_needed, text), 20_000)
+            CommandResult.Cancelled -> say(getString(R.string.cancelled))
+            is CommandResult.Run -> {
+                perform(result.command, text)
+                if (held != null && result.command === held) runSteps(rest)
+            }
+            null -> askAi(text)
         }
     }
 
-    private fun run(command: VoiceCommand) {
+    private fun perform(command: VoiceCommand, label: String) {
+        hudUntil = 0
+        val done = run(command)
+        Log.i("NexusXR", "Command ${command.javaClass.simpleName} ${if (done) "done" else "not possible"}")
+        // Commands that answer on screen, such as the time, keep their own message.
+        if (hudUntil == 0L || !done) say(if (done) "✓ $label" else getString(R.string.not_possible, label))
+    }
+
+    private suspend fun askAi(text: String) {
+        if (!settings.voiceAi) return say(getString(R.string.not_a_command, text))
+        if (!voice.llm.configured) return say(getString(R.string.no_ai_model, text), 6000)
+        say(getString(R.string.ai_thinking, text), 40_000)
+        val plan = try {
+            val reply = StringBuilder()
+            withTimeout(40_000) {
+                voice.llm.reply(text, AiControl.systemPrompt(windows.focused?.app)).collect {
+                    if (reply.length < 4000) reply.append(it)
+                }
+            }
+            AiControl.parse(reply.toString())
+        } catch (e: TimeoutCancellationException) {
+            return say(getString(R.string.ai_timeout))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return say(e.message ?: e.javaClass.simpleName, 6000)
+        }
+        if (plan.say.isNotEmpty()) say(plan.say.take(300), 9000)
+        else if (plan.steps.isEmpty()) say(getString(R.string.ai_nothing))
+        runSteps(plan.steps)
+    }
+
+    /** Runs the AI's steps in order, stopping to ask before any that could act for the user. */
+    private suspend fun runSteps(steps: List<VoiceCommand>) {
+        for ((i, step) in steps.withIndex()) {
+            if (AiControl.needsConfirmation(step)) {
+                commands.askFirst(step, SystemClock.uptimeMillis())
+                aiHeld = step
+                aiRest = steps.drop(i + 1)
+                return say(getString(R.string.ai_confirm, describe(step)), 20_000)
+            }
+            perform(step, describe(step))
+            // New windows and web pages need a moment before the next step can use them.
+            delay(if (step is VoiceCommand.Search || step is VoiceCommand.GoTo || step is VoiceCommand.Open) 2500 else 700)
+        }
+    }
+
+    private fun describe(command: VoiceCommand) = when (command) {
+        is VoiceCommand.Do -> command.act.phrases.first()
+        is VoiceCommand.Open -> "open " + VoiceCommands.NAMES[command.app]?.first()
+        is VoiceCommand.Close -> "close " + VoiceCommands.NAMES[command.app]?.first()
+        is VoiceCommand.Type -> "type " + command.text
+        is VoiceCommand.Search -> "search " + command.query
+        is VoiceCommand.GoTo -> "go to " + command.address
+        is VoiceCommand.ClickLabel -> "click " + command.label
+        is VoiceCommand.Timer -> "timer ${command.minutes}"
+        is VoiceCommand.AddTask -> "add task " + command.text
+        else -> command.toString().lowercase()
+    }
+
+    /** Commands spoken to the assistant window; it speaks the short answer. */
+    private fun onSpeech(sentence: String): String? {
+        val result = commands.handle(sentence, SystemClock.uptimeMillis()) ?: return null
+        val arabic = sentence.any { it in '\u0600'..'\u06FF' }
+        fun answer(english: String, arabicText: String) = if (arabic) arabicText else english
+        return when (result) {
+            is CommandResult.AskToConfirm -> answer("That closes things. Say confirm to continue, or cancel.", "ده هيقفل حاجات. قول تأكيد علشان أكمل، أو إلغاء.")
+            CommandResult.Cancelled -> answer("Cancelled.", "تمام، لغيت.")
+            is CommandResult.Run -> if (run(result.command)) answer("Done.", "تمام.") else answer("I can't do that here.", "مش هينفع هنا.")
+        }
+    }
+
+    private fun run(command: VoiceCommand): Boolean {
         when (command) {
             is VoiceCommand.Open -> open(command.app)
-            is VoiceCommand.Close -> windows.find(command.app)?.let { windows.close(it.id); onClosed(it.id) }
+            is VoiceCommand.Close -> {
+                val window = windows.find(command.app) ?: return false
+                windows.close(window.id)
+                onClosed(window.id)
+            }
             VoiceCommand.CloseAll -> {
                 // The assistant stays, so it can finish its reply.
                 windows.windows.filter { it.app != AppType.ASSISTANT }.forEach { windows.close(it.id) }
@@ -765,8 +1004,169 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             VoiceCommand.Arrange -> arrange()
             VoiceCommand.Cinema -> toggleCinema()
             VoiceCommand.Photo -> capturePhoto()
+            is VoiceCommand.Do -> return act(command.act)
+            is VoiceCommand.Type -> return target()?.takeIf { it.hasTextFocus }?.type(command.text) == true
+            is VoiceCommand.Search -> openUrl(searchUrl(settings.searchEngine, command.query))
+            is VoiceCommand.GoTo -> {
+                val spoken = command.address.trim().replace(Regex("\\s+(dot|دوت|نقطه|نقطة)\\s+", RegexOption.IGNORE_CASE), ".")
+                openUrl(
+                    when {
+                        spoken.startsWith("https://") -> spoken
+                        '.' in spoken && ' ' !in spoken -> "https://" + spoken.removePrefix("http://").lowercase()
+                        else -> searchUrl(settings.searchEngine, spoken)
+                    }
+                )
+            }
+            is VoiceCommand.ClickLabel -> {
+                val surface = target() ?: return false
+                surface.clickLabel(command.label) { found ->
+                    if (!found) say(getString(R.string.label_not_found, command.label))
+                }
+            }
+            is VoiceCommand.Timer -> setTimer(command.minutes)
+            is VoiceCommand.AddTask -> TaskStore.add(this, command.text)
+        }
+        return true
+    }
+
+    private fun act(act: Act): Boolean {
+        val focused = windows.focused
+        val surface = target()
+        fun change(update: (SpatialWindow) -> SpatialWindow): Boolean {
+            val window = focused ?: return false
+            windows.replace(update(window))
+            return true
+        }
+        fun scale(factor: Float) = change { it.copy(scale = (it.scale * factor).coerceIn(SpatialWindow.MIN_SCALE, SpatialWindow.MAX_SCALE)) }
+        fun side(value: Float) = value.coerceIn(SpatialWindow.MIN_SIDE, SpatialWindow.MAX_SIDE)
+        fun inApp(app: AppType): Boolean {
+            val window = focused?.takeIf { it.app == app } ?: windows.find(app) ?: return false
+            return surfaces[window.id]?.command(act) == true
+        }
+        fun key(code: Int): Boolean {
+            val field = surface?.takeIf { it.hasTextFocus } ?: return false
+            field.key(code)
+            return true
+        }
+        // The games use the movement words themselves.
+        if (focused?.app == AppType.GAMES && surface?.command(act) == true) return true
+        val look = head.orientation()
+        when (act) {
+            Act.CLOSE_THIS -> {
+                val window = focused ?: return false
+                windows.close(window.id)
+                onClosed(window.id)
+            }
+            Act.MINIMIZE -> { windows.minimize(focused?.id ?: return false) }
+            Act.RESTORE_ALL -> windows.windows.filter { it.minimized }.forEach { windows.replace(it.copy(minimized = false)) }
+            Act.BIGGER -> return scale(1.2f)
+            Act.SMALLER -> return scale(1 / 1.2f)
+            Act.WIDER -> return change { it.copy(width = side(it.width + 0.18f)) }
+            Act.NARROWER -> return change { it.copy(width = side(it.width - 0.18f)) }
+            Act.TALLER -> return change { it.copy(height = side(it.height + 0.14f)) }
+            Act.SHORTER -> return change { it.copy(height = side(it.height - 0.14f)) }
+            Act.CLOSER -> return change { it.copy(distance = (it.distance - 0.25f).coerceAtLeast(0.9f)) }
+            Act.FARTHER -> return change { it.copy(distance = (it.distance + 0.25f).coerceAtMost(3.5f)) }
+            Act.MOVE_LEFT -> return change { it.copy(yaw = it.yaw - 0.3f) }
+            Act.MOVE_RIGHT -> return change { it.copy(yaw = it.yaw + 0.3f) }
+            Act.MOVE_UP -> return change { it.copy(pitch = (it.pitch + 0.2f).coerceAtMost(1.1f)) }
+            Act.MOVE_DOWN -> return change { it.copy(pitch = (it.pitch - 0.2f).coerceAtLeast(-1.1f)) }
+            Act.BRING_HERE -> return change { it.copy(yaw = yawOf(look), pitch = pitchOf(look)) }
+            Act.NEXT_WINDOW -> {
+                val next = windows.windows.firstOrNull { !it.minimized && it.app != AppType.KEYBOARD && it.id != focused?.id } ?: return false
+                windows.focus(next.id)
+                windows.replace(next.copy(yaw = yawOf(look), pitch = pitchOf(look)))
+            }
+            Act.SAVE_LAYOUT -> settings.savedLayout =
+                LayoutCodec.encode(windows.windows.filter { it.app != AppType.KEYBOARD }, yawOf(look), pitchOf(look))
+            Act.RESTORE_LAYOUT -> {
+                val saved = LayoutCodec.decode(settings.savedLayout, yawOf(look), pitchOf(look))
+                if (saved.isEmpty()) return false
+                windows.restore(saved)
+            }
+            Act.CLICK -> {
+                val ray = aimRay ?: return false
+                if (windows.pick(ray) == null) return false
+                controller.handle(VOICE_POINTER, PointerPhase.DOWN, ray)
+                gl.postDelayed({ controller.handle(VOICE_POINTER, PointerPhase.UP, ray) }, 90)
+            }
+            Act.LONG_CLICK -> {
+                val hit = aimRay?.let(windows::pick)?.takeIf { it.region == Region.CONTENT } ?: return false
+                return surfaces[hit.windowId]?.longPressAt(hit.u, hit.v) == true
+            }
+            Act.SCROLL_DOWN -> return surface?.scroll(1) == true
+            Act.SCROLL_UP -> return surface?.scroll(-1) == true
+            Act.PAGE_TOP -> return surface?.scroll(-1, toEnd = true) == true
+            Act.PAGE_BOTTOM -> return surface?.scroll(1, toEnd = true) == true
+            Act.DELETE -> return key(KeyEvent.KEYCODE_DEL)
+            Act.DELETE_WORD -> return surface?.deleteWord() == true
+            Act.CLEAR_TEXT -> return surface?.clearText() == true
+            Act.ENTER -> return key(KeyEvent.KEYCODE_ENTER)
+            Act.SPACE -> return surface?.type(" ") == true
+            Act.SELECT_ALL -> return surface?.menu(android.R.id.selectAll) == true
+            Act.COPY -> return surface?.menu(android.R.id.copy) == true
+            Act.CUT -> return surface?.menu(android.R.id.cut) == true
+            Act.PASTE -> return surface?.menu(android.R.id.paste) == true
+            Act.UNDO -> return surface?.menu(android.R.id.undo) == true
+            Act.SHOW_KEYBOARD -> open(AppType.KEYBOARD)
+            Act.HIDE_KEYBOARD -> {
+                val window = windows.find(AppType.KEYBOARD) ?: return false
+                windows.close(window.id)
+            }
+            Act.BACK, Act.FORWARD, Act.RELOAD, Act.STOP_LOADING, Act.NEXT_TAB, Act.PREVIOUS_TAB, Act.CLOSE_TAB, Act.BOOKMARK,
+            Act.ZOOM_IN, Act.ZOOM_OUT -> return inApp(AppType.BROWSER)
+            Act.NEW_TAB, Act.SHOW_BOOKMARKS, Act.SHOW_HISTORY, Act.HOME_PAGE ->
+                return if (windows.find(AppType.BROWSER) == null) { open(AppType.BROWSER); true } else inApp(AppType.BROWSER)
+            Act.PLAY, Act.PAUSE, Act.SKIP, Act.REWIND -> return inApp(AppType.MEDIA)
+            Act.VOLUME_UP -> volume(1)
+            Act.VOLUME_DOWN -> volume(-1)
+            Act.MUTE, Act.UNMUTE -> getSystemService(AudioManager::class.java).adjustStreamVolume(
+                AudioManager.STREAM_MUSIC, if (act == Act.MUTE) AudioManager.ADJUST_MUTE else AudioManager.ADJUST_UNMUTE,
+                AudioManager.FLAG_SHOW_UI
+            )
+            Act.BRIGHTER -> brightness(0.2f)
+            Act.DIMMER -> brightness(-0.2f)
+            Act.DIM_MORE -> settings.dim += 0.2f
+            Act.DIM_LESS -> settings.dim -= 0.2f
+            Act.HEADSET_ON -> stereo = true
+            Act.HEADSET_OFF -> stereo = false
+            Act.CAMERA_VIEW -> { settings.passthrough = true; settingsChanged() }
+            Act.VIRTUAL_VIEW -> { settings.passthrough = false; settingsChanged() }
+            Act.NEXT_SCENE -> { settings.scene = (settings.scene + 1) % 4; settings.passthrough = false; settingsChanged() }
+            Act.START_RECORDING -> { if (recording != null) return false; toggleRecording(); return recording != null }
+            Act.STOP_RECORDING -> { if (recording == null) return false; toggleRecording() }
+            Act.TIME -> say(android.text.format.DateFormat.getTimeFormat(this).format(java.util.Date()), 5000)
+            Act.BATTERY -> say(getString(R.string.battery, getSystemService(BatteryManager::class.java).getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)), 5000)
+            Act.HELP -> open(AppType.VOICE)
+            Act.STOP_LISTENING -> { stopListening(); say(getString(R.string.voice_off)) }
+        }
+        return true
+    }
+
+    // ---- Timer and files ----
+
+    override fun setTimer(minutes: Int) {
+        timerEnd = if (minutes <= 0) 0 else SystemClock.elapsedRealtime() + minutes * 60_000L
+    }
+
+    override fun timerEndsAt() = timerEnd
+
+    private fun ring() {
+        timerEnd = 0
+        showHud(getString(R.string.time_up), SystemClock.uptimeMillis() + 8000)
+        runCatching {
+            val tone = ToneGenerator(AudioManager.STREAM_ALARM, 90)
+            tone.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 2500)
+            gl.postDelayed({ tone.release() }, 3000)
         }
     }
+
+    override fun importFiles() {
+        stereo = false // the system file picker is a normal flat screen
+        importPicker.launch(arrayOf("*/*"))
+    }
+
+    override fun isGpuTracking() = hands.gpu
 
     override fun statusLine(): String {
         val battery = getSystemService(BatteryManager::class.java).getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
@@ -841,6 +1241,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         const val EXTRA_HEADSET = "headset"
         private const val TOUCH_POINTER = 100
         private const val GAZE_POINTER = 101
+        private const val VOICE_POINTER = 102
+        private val WAKE_WORDS = setOf("nexus", "نكسس", "نيكسس", "نكزس")
         private const val CINEMA_DIM = 0.7f
         private const val SETTLE_MS = 1500L
         private const val STILL_MS = 1500L

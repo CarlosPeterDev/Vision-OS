@@ -59,6 +59,16 @@ interface Shell {
     fun settingsChanged()
 
     fun assistant(context: Context): SpatialApp
+
+    fun toggleVoiceControl()
+    fun voiceControlState(): String
+    fun isListening(): Boolean
+    /** Starts a countdown that rings even when the Clock window is closed; zero cancels it. */
+    fun setTimer(minutes: Int)
+    /** When the countdown ends, in elapsed-realtime milliseconds; zero when there is none. */
+    fun timerEndsAt(): Long
+    fun importFiles()
+    fun isGpuTracking(): Boolean
     fun exit()
 }
 
@@ -81,7 +91,14 @@ val APP_INFO: Map<AppType, AppInfo> = listOf(
     AppInfo(AppType.PHOTOS, R.string.app_photos, R.drawable.ic_ui_photos, colours(0xFFFFB45A, 0xFFE0457B)),
     AppInfo(AppType.FILES, R.string.app_files, R.drawable.ic_ui_files, colours(0xFF6FB6FF, 0xFF2C55C9)),
     AppInfo(AppType.CAMERA, R.string.app_camera, R.drawable.ic_ui_camera, colours(0xFF9AA3AE, 0xFF2F353E)),
-    AppInfo(AppType.LAUNCHER, R.string.app_launcher, R.drawable.ic_ui_launcher, colours(0xFF7EE08A, 0xFF1F8A4C))
+    AppInfo(AppType.LAUNCHER, R.string.app_launcher, R.drawable.ic_ui_launcher, colours(0xFF7EE08A, 0xFF1F8A4C)),
+    AppInfo(AppType.TASKS, R.string.app_tasks, R.drawable.ic_ui_tasks, colours(0xFF7FB2FF, 0xFF3B4FD0)),
+    AppInfo(AppType.CALENDAR, R.string.app_calendar, R.drawable.ic_ui_calendar, colours(0xFFFF8A80, 0xFFC62828)),
+    AppInfo(AppType.PAINT, R.string.app_paint, R.drawable.ic_ui_paint, colours(0xFFFF9ECF, 0xFF8E3CC9)),
+    AppInfo(AppType.CONVERTER, R.string.app_converter, R.drawable.ic_ui_converter, colours(0xFF6EE7C8, 0xFF12806A)),
+    AppInfo(AppType.GAMES, R.string.app_games, R.drawable.ic_ui_games, colours(0xFFFFC857, 0xFFD9661F)),
+    AppInfo(AppType.WEATHER, R.string.app_weather, R.drawable.ic_ui_weather, colours(0xFF82D8FF, 0xFF2368C4)),
+    AppInfo(AppType.VOICE, R.string.app_voice, R.drawable.ic_ui_mic, colours(0xFFB69CFF, 0xFF5A35B5))
 ).associateBy { it.type }
 
 fun appTitle(context: Context, app: AppType): String = context.getString(APP_INFO.getValue(app).title)

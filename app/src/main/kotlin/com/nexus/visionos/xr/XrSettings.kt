@@ -18,6 +18,12 @@ class XrSettings(context: Context) {
         operator fun getValue(owner: Any?, p: KProperty<*>) = prefs.getInt(p.name, default).coerceIn(range)
         operator fun setValue(owner: Any?, p: KProperty<*>, v: Int) = prefs.edit().putInt(p.name, v.coerceIn(range)).apply()
     }
+    private inner class Text(private val default: String) {
+        operator fun getValue(owner: Any?, p: KProperty<*>) = prefs.getString(p.name, default) ?: default
+        operator fun setValue(owner: Any?, p: KProperty<*>, v: String) = prefs.edit().putString(p.name, v).apply()
+    }
+    /** Returns every setting to its starting value. Files, notes and sign-ins are not touched. */
+    fun reset() = prefs.edit().clear().apply()
     private inner class Decimal(private val default: Float, private val low: Float, private val high: Float) {
         operator fun getValue(owner: Any?, p: KProperty<*>) = prefs.getFloat(p.name, default).coerceIn(low, high)
         operator fun setValue(owner: Any?, p: KProperty<*>, v: Float) = prefs.edit().putFloat(p.name, v.coerceIn(low, high)).apply()
@@ -47,6 +53,36 @@ class XrSettings(context: Context) {
     var releaseRatio by Decimal(0.42f, 0.2f, 0.75f)
     var swapHandSides by Bool(false)
 
+    var longPressMs by Number(2000, 1500..4000)
+    var freeResize by Bool(true)
+    /** Text size inside windows. Takes effect for windows opened afterwards. */
+    var textScale by Decimal(1f, 0.85f, 1.35f)
+    var windowDistance by Decimal(1.75f, 1.1f, 2.8f)
+    var palmShortcuts by Bool(true)
+    var cursorSize by Decimal(1f, 0.6f, 1.8f)
+    var showStatus by Bool(true)
+    var gpuTracking by Bool(false)
+
+    /** Hands-free voice control starts together with spatial mode. */
+    var voiceAutoStart by Bool(false)
+    /** Refuse any recognizer that may send audio off the phone. */
+    var voiceOfflineOnly by Bool(true)
+    /** 0 the phone's language, 1 English, 2 Arabic. */
+    var voiceLanguage by Number(0, 0..2)
+    /** Only react to sentences that start with "Nexus". */
+    var wakeWord by Bool(false)
+    /** Sentences that are not commands go to the configured AI model as text. */
+    var voiceAi by Bool(true)
+
+    var searchEngine by Number(0, 0..3)
+    var homePage by Text("")
+    var thirdPartyCookies by Bool(false)
+    var desktopSites by Bool(false)
+    var saveHistory by Bool(true)
+    var restoreTabs by Bool(true)
+    var webTextZoom by Number(100, 60..200)
+    var weatherCity by Text("")
+
     var sounds by Bool(true)
     var haptics by Bool(true)
     var restoreLayout by Bool(true)
@@ -54,6 +90,9 @@ class XrSettings(context: Context) {
     var folder: String
         get() = prefs.getString("folder", "") ?: ""
         set(v) = prefs.edit().putString("folder", v).apply()
+    var savedLayout: String
+        get() = prefs.getString("savedLayout", "") ?: ""
+        set(v) = prefs.edit().putString("savedLayout", v).apply()
     var layout: String
         get() = prefs.getString("layout", "") ?: ""
         set(v) = prefs.edit().putString("layout", v).apply()

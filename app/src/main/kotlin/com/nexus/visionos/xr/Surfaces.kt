@@ -7,7 +7,9 @@ import android.graphics.Rect
 import android.graphics.drawable.ColorDrawable
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
+import android.content.res.Configuration
 import android.os.SystemClock
+import android.view.ContextThemeWrapper
 import android.util.Log
 import android.view.InputDevice
 import android.view.KeyEvent
@@ -21,13 +23,21 @@ import android.view.inputmethod.InputConnection
 import android.webkit.WebView
 import android.widget.AbsListView
 import android.widget.ScrollView
+import com.nexus.xr.Act
+import com.nexus.xr.VoiceCommands
+import org.json.JSONObject
 import com.nexus.xr.PressAction
 import com.nexus.xr.PressEvent
 import com.nexus.xr.PressGate
 import com.nexus.xr.TouchAction
 
 /** Content of a spatial window. */
-class SpatialApp(val view: View, val dispose: () -> Unit = {})
+class SpatialApp(val view: View, val dispose: () -> Unit = {}) {
+    /** Carries out a spoken action the app understands. Returns false when it does not apply. */
+    var command: ((Act) -> Boolean)? = null
+    /** Saves anything that must survive the app being closed by the system. */
+    var flush: () -> Unit = {}
+}
 
 /**
  * A real Android view hierarchy rendered into a GPU texture: a private virtual display
@@ -36,11 +46,17 @@ class SpatialApp(val view: View, val dispose: () -> Unit = {})
 class SpatialSurface(
     private val activity: Activity,
     private val name: String,
-    val width: Int,
-    val height: Int,
+    width: Int,
+    height: Int,
+    private val textScale: Float,
+    private val longPressMs: () -> Long,
     private val onHoverTarget: () -> Unit,
     private val create: (android.content.Context) -> SpatialApp
 ) {
+    var width = width
+        private set
+    var height = height
+        private set
     private var display: VirtualDisplay? = null
     private var presentation: Presentation? = null
     private var app: SpatialApp? = null
@@ -65,19 +81,52 @@ class SpatialSurface(
         ) ?: return
         display = virtual
         try {
-            val window = Presentation(activity, virtual.display, android.R.style.Theme_DeviceDefault_NoActionBar)
-            window.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-            window.window?.addFlags(WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED)
-            window.setCancelable(false)
-            val content = create(window.context)
-            window.setContentView(content.view)
-            window.show()
-            app = content
-            presentation = window
+            present(virtual) { context ->
+                val content = create(scaled(context))
+                app = content
+                content.view
+            }
             Log.i("NexusXR", "Spatial surface $name ready")
         } catch (e: RuntimeException) {
             Log.e("NexusXR", "Spatial surface $name failed", e)
         }
+    }
+
+    private fun present(on: VirtualDisplay, content: (android.content.Context) -> View) {
+        val window = Presentation(activity, on.display, android.R.style.Theme_DeviceDefault_NoActionBar)
+        window.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        window.window?.addFlags(WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED)
+        window.setCancelable(false)
+        window.setContentView(content(window.context))
+        window.show()
+        presentation = window
+    }
+
+    private fun scaled(context: android.content.Context): android.content.Context {
+        if (textScale == 1f) return context
+        return ContextThemeWrapper(context, android.R.style.Theme_DeviceDefault_NoActionBar).apply {
+            applyOverrideConfiguration(Configuration().also { it.fontScale = textScale })
+        }
+    }
+
+    /**
+     * Gives the window a new shape. Android closes a Presentation whose display changes size, so the
+     * same views move into a new one and keep their state. [resizeTexture] runs before the display.
+     */
+    fun resize(newWidth: Int, newHeight: Int, resizeTexture: () -> Unit) {
+        val virtual = display ?: return
+        val view = app?.view ?: return
+        show(null)
+        gate.cancel()
+        delivering = false
+        (view.parent as? ViewGroup)?.removeView(view)
+        runCatching { presentation?.dismiss() }
+        presentation = null
+        width = newWidth
+        height = newHeight
+        resizeTexture()
+        virtual.resize(newWidth, newHeight, DPI)
+        runCatching { present(virtual) { view } }.onFailure { Log.e("NexusXR", "Resizing $name failed", it) }
     }
 
     private val root: View? get() = presentation?.window?.decorView
@@ -89,6 +138,7 @@ class SpatialSurface(
         val now = SystemClock.uptimeMillis()
         val events = when (action) {
             TouchAction.DOWN -> {
+                gate.longPressMs = longPressMs()
                 trail.clear()
                 show(clickableAt(x, y))
                 gate.down(x, y, now)
@@ -260,7 +310,88 @@ class SpatialSurface(
     @Suppress("UNCHECKED_CAST")
     fun navigate(url: String) { (app?.view?.tag as? (String) -> Unit)?.invoke(url) }
 
-    fun menu(action: Int) { input()?.second?.performContextMenuAction(action) }
+    fun menu(action: Int): Boolean = input()?.second?.performContextMenuAction(action) == true
+
+    fun command(act: Act): Boolean = app?.command?.invoke(act) == true
+
+    fun flush() { app?.flush?.invoke() }
+
+    /** True when something that accepts text has the focus. */
+    val hasTextFocus get() = root?.findFocus()?.let { it is android.widget.EditText || it is WebView } == true
+
+    fun deleteWord(): Boolean {
+        val connection = input()?.second ?: return false
+        val before = connection.getTextBeforeCursor(200, 0)?.toString().orEmpty()
+        if (before.isEmpty()) return false
+        val trimmed = before.trimEnd()
+        val keep = trimmed.lastIndexOfAny(charArrayOf(' ', '\n')) + 1
+        return connection.deleteSurroundingText(before.length - keep, 0)
+    }
+
+    fun clearText(): Boolean {
+        val focused = root?.findFocus()
+        if (focused is android.widget.EditText) { focused.text.clear(); return true }
+        return menu(android.R.id.selectAll) && type("")
+    }
+
+    private fun scroller(view: View? = root): View? {
+        if (view == null || view.visibility != View.VISIBLE) return null
+        if (view is WebView || view is ScrollView || view is AbsListView) return view
+        if (view is ViewGroup) for (i in view.childCount - 1 downTo 0) scroller(view.getChildAt(i))?.let { return it }
+        return null
+    }
+
+    /** Scrolls by a share of the window height; [toEnd] jumps to the top or bottom instead. */
+    fun scroll(direction: Int, toEnd: Boolean = false): Boolean {
+        val view = scroller() ?: return false
+        val amount = direction * (view.height * 0.7f).toInt()
+        when (view) {
+            is WebView -> if (toEnd) { if (direction < 0) view.pageUp(true) else view.pageDown(true) }
+            else view.flingScroll(0, amount * 3)
+            is ScrollView -> if (toEnd) view.fullScroll(if (direction < 0) View.FOCUS_UP else View.FOCUS_DOWN)
+            else view.smoothScrollBy(0, amount)
+            is AbsListView -> view.smoothScrollBy(amount, 300)
+        }
+        return true
+    }
+
+    /** Presses the visible control whose text or description is [label]. Reports through [done]. */
+    fun clickLabel(label: String, done: (Boolean) -> Unit) {
+        val wanted = VoiceCommands.normalize(label)
+        if (wanted.isEmpty()) return done(false)
+        val found = mutableListOf<Pair<Int, View>>()
+        var web: WebView? = null
+        fun visit(view: View) {
+            if (view.visibility != View.VISIBLE || !view.isShown) return
+            if (view is WebView) { web = view; return }
+            val text = VoiceCommands.normalize(
+                (view as? android.widget.TextView)?.text?.toString() ?: view.contentDescription?.toString().orEmpty()
+            )
+            if (text.isNotEmpty() && (text == wanted || wanted.length > 2 && text.startsWith(wanted))) {
+                var target: View? = view
+                while (target != null && !target.isClickable) target = target.parent as? View
+                if (target != null) found += (if (text == wanted) 0 else 1) to target
+            }
+            if (view is ViewGroup) for (i in 0 until view.childCount) visit(view.getChildAt(i))
+        }
+        root?.let(::visit)
+        found.minByOrNull { it.first }?.let { it.second.performClick(); return done(true) }
+        val page = web ?: return done(false)
+        // The label is passed as a quoted string literal; the script only looks for it and clicks.
+        val script = "(function(w){var l=document.querySelectorAll('a,button,input,[role=button],summary,label');" +
+            "var best=null;for(var i=0;i<l.length;i++){var e=l[i];var r=e.getBoundingClientRect();if(!r.width||!r.height)continue;" +
+            "var t=(e.innerText||e.value||e.getAttribute('aria-label')||'').trim().toLowerCase();" +
+            "if(t===w){best=e;break}if(!best&&w.length>2&&t.indexOf(w)===0)best=e}" +
+            "if(!best)return false;best.focus();best.click();return true})(" + JSONObject.quote(label.trim().lowercase()) + ")"
+        page.evaluateJavascript(script) { done(it == "true") }
+    }
+
+    /** A long press at a point, for the spoken "long press". */
+    fun longPressAt(u: Float, v: Float): Boolean {
+        var view: View? = deepestAt(u * width, v * height)
+        while (view != null && !view.isLongClickable) view = view.parent as? View
+        return view?.performLongClick() == true
+    }
 
     fun release() {
         show(null)

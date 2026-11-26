@@ -10,13 +10,15 @@ object OpenAiProtocol {
         return "$base/chat/completions"
     }
 
-    fun request(model: String, userText: String): String = buildJsonObject {
+    const val ASSISTANT_PROMPT = "You are Nexus, a voice assistant. Answer briefly in plain spoken text, in the user's language."
+
+    fun request(model: String, userText: String, system: String = ASSISTANT_PROMPT): String = buildJsonObject {
         put("model", model)
         put("stream", true)
         putJsonArray("messages") {
             addJsonObject {
                 put("role", "system")
-                put("content", "You are Nexus, a voice assistant. Answer briefly in plain spoken text, in the user's language.")
+                put("content", system)
             }
             addJsonObject { put("role", "user"); put("content", userText) }
         }

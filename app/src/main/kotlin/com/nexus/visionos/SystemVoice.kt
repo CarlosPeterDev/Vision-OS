@@ -2,6 +2,7 @@ package com.nexus.visionos
 
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -72,15 +73,32 @@ class SystemTts(context: Context) : TtsProvider {
     fun shutdown() = engine.shutdown()
 }
 
-/** Android SpeechRecognizer fallback. Offline support depends on the device and language packs. */
-class SystemStt(private val context: Context) : SttProvider {
+/**
+ * Android's own speech recognition. Offline support depends on the device and its language packs.
+ * With [offline] set, the on-device recognizer is used where the phone has one. [onDeviceOnly]
+ * then refuses any recognizer that might send audio away.
+ */
+class SystemStt(
+    private val context: Context,
+    private val offline: Boolean = false,
+    private val onDeviceOnly: () -> Boolean = { false }
+) : SttProvider {
     override val name = "Android SpeechRecognizer"
 
+    /** True when the phone has a recognizer that never uses the network. */
+    val hasOnDevice: Boolean
+        get() = Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
+
     override fun listen(language: Language?): Flow<SttEvent> = callbackFlow {
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+        val local = offline && hasOnDevice
+        if (offline && !local && onDeviceOnly()) {
+            throw VoiceException(ErrorKind.NOT_FOUND, context.getString(R.string.no_offline_recognizer))
+        }
+        if (!local && !SpeechRecognizer.isRecognitionAvailable(context)) {
             throw VoiceException(ErrorKind.NOT_FOUND, "This device has no speech recognition service")
         }
-        val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+        val recognizer = if (local && Build.VERSION.SDK_INT >= 31) SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+        else SpeechRecognizer.createSpeechRecognizer(context)
         fun first(b: Bundle?) = b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
         recognizer.setRecognitionListener(object : RecognitionListener {
             override fun onPartialResults(partialResults: Bundle?) {
@@ -95,9 +113,19 @@ class SystemStt(private val context: Context) : SttProvider {
                     SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> ErrorKind.NO_SPEECH
                     SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> ErrorKind.NETWORK
                     SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> ErrorKind.PERMISSION
+                    // Language not supported or its offline pack not downloaded (Android 12 and later).
+                    12, 13 -> ErrorKind.NOT_FOUND
                     else -> ErrorKind.UNKNOWN
                 }
-                close(VoiceException(kind, if (kind == ErrorKind.NO_SPEECH) "No speech heard" else "Android recognition error $error"))
+                close(
+                    VoiceException(
+                        kind, when {
+                            kind == ErrorKind.NO_SPEECH -> "No speech heard"
+                            error == 12 || error == 13 -> context.getString(R.string.no_language_pack)
+                            else -> "Android recognition error $error"
+                        }
+                    )
+                )
             }
             override fun onReadyForSpeech(params: Bundle?) {}
             override fun onBeginningOfSpeech() {}
@@ -109,6 +137,7 @@ class SystemStt(private val context: Context) : SttProvider {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, offline)
         // "Auto" leaves the device's default recognition language in place.
         language?.let { intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, it.tag) }
         recognizer.startListening(intent)

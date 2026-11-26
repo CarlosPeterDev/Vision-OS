@@ -21,6 +21,7 @@ class VoiceStack(context: Context, scope: CoroutineScope, onFallback: (String, V
     private val systemTts = SystemTts(context)
     val engine: VoiceEngine
     val stt: SttProvider
+    val llm: LlmClient
     /** Returns a spoken answer for sentences the app handles itself, or null to ask the AI model. */
     var interceptor: ((String) -> String?)? = null
 
@@ -35,7 +36,7 @@ class VoiceStack(context: Context, scope: CoroutineScope, onFallback: (String, V
             ElevenLabsTts(transport, api, settings::elevenLabs, TrackSink(), usage), systemTts,
             ttsHealth, { cloudEnabled() && settings.voiceId.isNotBlank() }
         ) { onFallback("TTS", it) }
-        val llm = LlmClient(client, settings, secrets) { context.getString(R.string.echo_prefix) }
+        llm = LlmClient(client, settings, secrets) { context.getString(R.string.echo_prefix) }
         val interrupt: (() -> Flow<Unit>)? =
             if (MicSource.supportsBargeIn) ({ if (settings.bargeIn) mic.bargeIn() else emptyFlow() }) else null
         engine = VoiceEngine(scope, stt, tts, interrupt) { heard ->

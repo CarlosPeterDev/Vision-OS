@@ -4,7 +4,8 @@ import kotlin.math.*
 
 enum class AppType {
     HOME, BROWSER, NOTES, CALCULATOR, CLOCK, MEDIA, SETTINGS, ASSISTANT, KEYBOARD,
-    CENTER, TUTORIAL, PHOTOS, FILES, CAMERA, LAUNCHER
+    CENTER, TUTORIAL, PHOTOS, FILES, CAMERA, LAUNCHER,
+    TASKS, CALENDAR, PAINT, CONVERTER, GAMES, WEATHER, VOICE
 }
 
 /** A flat window on a sphere around the user, always facing the centre. */
@@ -42,6 +43,9 @@ data class SpatialWindow(
         const val CONTROL_GAP = 0.03f
         const val MIN_SCALE = 0.5f
         const val MAX_SCALE = 2.2f
+        /** Limits for a window's own width and height in metres, before scaling. */
+        const val MIN_SIDE = 0.4f
+        const val MAX_SIDE = 2.0f
     }
 }
 
@@ -127,26 +131,34 @@ object LayoutCodec {
     fun encode(windows: List<SpatialWindow>, headYaw: Float, headPitch: Float): String =
         windows.filter { !it.minimized }.joinToString(";") {
             val yaw = atan2(sin(it.yaw - headYaw), cos(it.yaw - headYaw))
-            "${it.app.name},$yaw,${it.pitch - headPitch},${it.distance},${it.scale},${it.curved}"
+            "${it.app.name},$yaw,${it.pitch - headPitch},${it.distance},${it.scale},${it.curved},${it.width},${it.height}"
         }
 
     fun decode(text: String, headYaw: Float, headPitch: Float): List<SpatialWindow> =
         text.split(';').mapNotNull { item ->
             val p = item.split(',')
-            if (p.size != 6) return@mapNotNull null
+            if (p.size != 6 && p.size != 8) return@mapNotNull null
             val app = AppType.entries.firstOrNull { it.name == p[0] } ?: return@mapNotNull null
             val n = (1..4).map { p[it].toFloatOrNull()?.takeIf { v -> v.isFinite() } ?: return@mapNotNull null }
             SpatialWindow(
                 0, app, headYaw + n[0], (headPitch + n[1]).coerceIn(-1.1f, 1.1f), n[2].coerceIn(0.9f, 3.5f),
-                0f, 0f, n[3].coerceIn(SpatialWindow.MIN_SCALE, SpatialWindow.MAX_SCALE), curved = p[5] == "true"
+                side(p.getOrNull(6)), side(p.getOrNull(7)),
+                n[3].coerceIn(SpatialWindow.MIN_SCALE, SpatialWindow.MAX_SCALE), curved = p[5] == "true"
             )
         }.distinctBy { it.app }
+
+    /** Zero means "use the app's normal size". */
+    private fun side(text: String?) = text?.toFloatOrNull()?.takeIf { it.isFinite() && it > 0f }
+        ?.coerceIn(SpatialWindow.MIN_SIDE, SpatialWindow.MAX_SIDE) ?: 0f
 }
 
 /** Window list in focus order: the last element is focused. Not thread safe. */
 class WindowManager(private val maxWindows: Int = 6) {
     private val items = mutableListOf<SpatialWindow>()
     private var nextId = 1
+
+    /** How far away new and rearranged windows are placed, in metres. */
+    var defaultDistance = 1.7f
 
     val windows: List<SpatialWindow> get() = items.toList()
     val focused: SpatialWindow? get() = items.lastOrNull { !it.minimized && it.app != AppType.KEYBOARD }
@@ -175,7 +187,7 @@ class WindowManager(private val maxWindows: Int = 6) {
         val offset = if (keyboard) 0f else floatArrayOf(0f, 0.62f, -0.62f, 1.24f, -1.24f, 0f)[used % 6]
         val window = SpatialWindow(
             nextId++, app, headYaw + offset, restingPitch(app, eye),
-            if (keyboard) 1.35f else 1.7f, width, height
+            if (keyboard) 1.35f else defaultDistance, width, height
         )
         items += window
         return window
@@ -184,7 +196,8 @@ class WindowManager(private val maxWindows: Int = 6) {
     private fun sizeOf(app: AppType) = when (app) {
         AppType.KEYBOARD -> 0.95f to 0.42f
         AppType.CALCULATOR -> 0.55f to 0.72f
-        AppType.BROWSER, AppType.MEDIA, AppType.PHOTOS -> 1.2f to 0.75f
+        AppType.BROWSER, AppType.MEDIA, AppType.PHOTOS, AppType.FILES, AppType.PAINT -> 1.2f to 0.75f
+        AppType.GAMES -> 0.7f to 0.75f
         else -> 0.9f to 0.65f
     }
 
@@ -195,6 +208,8 @@ class WindowManager(private val maxWindows: Int = 6) {
             replace(
                 window.copy(
                     yaw = want.yaw, pitch = want.pitch, distance = want.distance,
+                    width = if (want.width > 0f) want.width else window.width,
+                    height = if (want.height > 0f) want.height else window.height,
                     scale = want.scale, curved = want.curved, minimized = false
                 )
             )
@@ -235,7 +250,7 @@ class WindowManager(private val maxWindows: Int = 6) {
         val visible = items.filter { !it.minimized && it.app != AppType.KEYBOARD }
         visible.forEachIndexed { i, w ->
             val slot = if (i % 2 == 0) i / 2 else -(i + 1) / 2
-            replace(w.copy(yaw = headYaw + slot * 0.68f, pitch = eye, distance = 1.75f, scale = 1f, curved = false))
+            replace(w.copy(yaw = headYaw + slot * 0.68f, pitch = eye, distance = defaultDistance + 0.05f, scale = 1f, curved = false))
         }
         find(AppType.KEYBOARD)?.let { replace(it.copy(yaw = headYaw, pitch = eye - 0.38f, distance = 1.35f, scale = 1f)) }
     }

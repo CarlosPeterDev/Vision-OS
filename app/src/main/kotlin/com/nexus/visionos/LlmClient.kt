@@ -26,13 +26,15 @@ class LlmClient(
     private val secrets: SecretStore,
     private val echoPrefix: () -> String
 ) {
-    fun reply(userText: String): Flow<String> {
+    val configured get() = settings.llmBaseUrl.isNotBlank() && settings.llmModel.isNotBlank()
+
+    fun reply(userText: String, system: String = OpenAiProtocol.ASSISTANT_PROMPT): Flow<String> {
         val base = settings.llmBaseUrl
         val model = settings.llmModel
         if (base.isBlank() || model.isBlank()) return flow { emit("${echoPrefix()} $userText") }
         return channelFlow {
             val builder = Request.Builder().url(OpenAiProtocol.endpoint(base))
-                .post(OpenAiProtocol.request(model, userText).toRequestBody("application/json".toMediaType()))
+                .post(OpenAiProtocol.request(model, userText, system).toRequestBody("application/json".toMediaType()))
             secrets.get(SecretStore.LLM)?.let { builder.header("Authorization", "Bearer $it") }
             client.execute(builder.build()) { response ->
                 if (!response.isSuccessful) throw IOException("AI provider returned HTTP ${response.code}")

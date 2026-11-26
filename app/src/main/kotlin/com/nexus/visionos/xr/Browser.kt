@@ -12,15 +12,62 @@ import android.webkit.PermissionRequest
 import android.webkit.URLUtil
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import com.nexus.visionos.R
+import com.nexus.xr.Act
 import org.json.JSONArray
 import org.json.JSONObject
 
 private const val MAX_TABS = 4
+private const val MAX_HISTORY = 200
+
+private val SEARCH_ENGINES = listOf(
+    "Google" to "https://www.google.com/search?q=",
+    "DuckDuckGo" to "https://duckduckgo.com/?q=",
+    "Bing" to "https://www.bing.com/search?q=",
+    "Brave" to "https://search.brave.com/search?q="
+)
+private val ENGINE_HOMES = listOf("https://www.google.com", "https://duckduckgo.com", "https://www.bing.com", "https://search.brave.com")
+
+fun searchUrl(index: Int, query: String) = SEARCH_ENGINES[index.coerceIn(SEARCH_ENGINES.indices)].second + Uri.encode(query)
+
+fun searchEngineName(index: Int) = SEARCH_ENGINES[index.coerceIn(SEARCH_ENGINES.indices)].first
+
+/** What the browser keeps on this phone between launches, apart from the web engine's own storage. */
+object BrowserData {
+    private fun prefs(context: Context) = context.applicationContext.getSharedPreferences("browser", Context.MODE_PRIVATE)
+
+    internal fun pairs(context: Context, key: String): List<Pair<String, String>> = runCatching {
+        val list = JSONArray(prefs(context).getString(key, "[]"))
+        (0 until list.length()).map { list.getJSONObject(it).let { item -> item.getString("title") to item.getString("url") } }
+    }.getOrDefault(emptyList())
+
+    private fun save(context: Context, key: String, items: List<Pair<String, String>>) {
+        val array = JSONArray()
+        items.forEach { array.put(JSONObject().put("title", it.first).put("url", it.second)) }
+        prefs(context).edit().putString(key, array.toString()).apply()
+    }
+
+    internal fun visited(context: Context, title: String, url: String) =
+        save(context, "history", (listOf(title to url) + pairs(context, "history").filter { it.second != url }).take(MAX_HISTORY))
+
+    internal fun openTabs(context: Context) = pairs(context, "tabs").map { it.second }
+    internal fun saveTabs(context: Context, urls: List<String>) = save(context, "tabs", urls.map { "" to it })
+
+    fun clearHistory(context: Context) = prefs(context).edit().remove("history").remove("tabs").apply()
+
+    /** Signs out of every website and forgets what they stored. Bookmarks are kept. */
+    fun clearAll(context: Context) {
+        clearHistory(context)
+        CookieManager.getInstance().apply { removeAllCookies(null); flush() }
+        WebStorage.getInstance().deleteAllData()
+        WebView(context.applicationContext).apply { clearCache(true); clearFormData(); destroy() }
+    }
+}
 
 private class Bookmarks(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("bookmarks", Context.MODE_PRIVATE)
@@ -65,7 +112,7 @@ internal fun browser(context: Context, shell: Shell): SpatialApp {
             text.startsWith("https://") -> text
             text.startsWith("http://") -> "https://" + text.removePrefix("http://")
             '.' in text && ' ' !in text -> "https://$text"
-            else -> "https://www.google.com/search?q=" + Uri.encode(text)
+            else -> SEARCH_ENGINES[shell.settings.searchEngine].second + Uri.encode(text)
         }
         notice.visibility = View.GONE
         web().loadUrl(url)
@@ -99,8 +146,29 @@ internal fun browser(context: Context, shell: Shell): SpatialApp {
         }
     }
 
+    fun home() = shell.settings.homePage.ifBlank { ENGINE_HOMES[shell.settings.searchEngine] }
+
+    /** Cookies keep the user signed in; they are written to storage right away. */
+    fun persist() {
+        CookieManager.getInstance().flush()
+        if (shell.settings.restoreTabs) {
+            BrowserData.saveTabs(context, tabs.mapNotNull { it.url?.takeIf { url -> url.startsWith("https://") } })
+        }
+    }
+
     fun newWeb() = WebView(context).also { view ->
+        CookieManager.getInstance().setAcceptCookie(true)
+        CookieManager.getInstance().setAcceptThirdPartyCookies(view, shell.settings.thirdPartyCookies)
         view.settings.apply {
+            textZoom = shell.settings.webTextZoom
+            useWideViewPort = true
+            loadWithOverviewMode = true
+            builtInZoomControls = true
+            displayZoomControls = false
+            if (shell.settings.desktopSites) {
+                // The same engine name without the mobile markers, which asks sites for their desktop pages.
+                userAgentString = userAgentString.replace(Regex("\\(Linux; Android[^)]*\\)"), "(X11; Linux x86_64)").replace(" Mobile ", " ")
+            }
             javaScriptEnabled = true
             domStorageEnabled = true
             allowFileAccess = false
@@ -112,6 +180,8 @@ internal fun browser(context: Context, shell: Shell): SpatialApp {
             override fun shouldOverrideUrlLoading(v: WebView, request: WebResourceRequest) = request.url.scheme != "https"
             override fun onPageFinished(v: WebView, url: String) {
                 if (v === web()) { if (!address.hasFocus()) address.setText(url); refreshStar() }
+                if (shell.settings.saveHistory && url.startsWith("https://")) BrowserData.visited(context, v.title.orEmpty(), url)
+                persist()
             }
         }
         view.webChromeClient = object : WebChromeClient() {
@@ -133,29 +203,59 @@ internal fun browser(context: Context, shell: Shell): SpatialApp {
         if (tabs.size < MAX_TABS) strip.iconKey(R.drawable.ic_ui_nearer) {
             tabs += newWeb()
             show(tabs.lastIndex)
-            go("https://www.google.com")
+            go(home())
         }
         if (tabs.size > 1) strip.iconKey(R.drawable.ic_ui_close) {
             val old = tabs.removeAt(current)
             pages.removeView(old)
             old.destroy()
             show(current.coerceAtMost(tabs.lastIndex))
+            persist()
         }
     }
 
-    fun showBookmarks() {
-        val saved = bookmarks.all()
-        if (saved.isEmpty()) return ask(context.getString(R.string.no_bookmarks), 0, null)
+    fun showList(saved: List<Pair<String, String>>, empty: Int) {
+        if (saved.isEmpty()) return ask(context.getString(empty), 0, null)
+        fun restore() { pages.removeAllViews(); pages.addView(web(), FrameLayout.LayoutParams(-1, -1)) }
         val list = context.scrolling {
-            saved.forEach { (title, url) ->
-                key(title.ifBlank { url }) { pages.removeAllViews(); pages.addView(web(), FrameLayout.LayoutParams(-1, -1)); go(url) }
-            }
-            key(context.getString(R.string.dismiss), tint = 0x5AB0FF) {
-                pages.removeAllViews(); pages.addView(web(), FrameLayout.LayoutParams(-1, -1))
-            }
+            key(context.getString(R.string.dismiss), tint = 0x5AB0FF) { restore() }
+            saved.forEach { (title, url) -> key(title.ifBlank { url }) { restore(); go(url) } }
         }
         list.background = LiquidGlass(0x101520, 0xE8, 0x66, context.px(18).toFloat())
         pages.addView(list, FrameLayout.LayoutParams(-1, -1))
+    }
+    fun showBookmarks() = showList(bookmarks.all(), R.string.no_bookmarks)
+
+    fun spoken(act: Act): Boolean {
+        when (act) {
+            Act.BACK -> { if (!web().canGoBack()) return false; web().goBack() }
+            Act.FORWARD -> { if (!web().canGoForward()) return false; web().goForward() }
+            Act.RELOAD -> web().reload()
+            Act.STOP_LOADING -> web().stopLoading()
+            Act.NEW_TAB -> {
+                if (tabs.size >= MAX_TABS) return false
+                tabs += newWeb(); show(tabs.lastIndex); go(home())
+            }
+            Act.CLOSE_TAB -> {
+                if (tabs.size < 2) return false
+                val old = tabs.removeAt(current)
+                pages.removeView(old); old.destroy(); show(current.coerceAtMost(tabs.lastIndex)); persist()
+            }
+            Act.NEXT_TAB -> show((current + 1) % tabs.size)
+            Act.PREVIOUS_TAB -> show((current + tabs.size - 1) % tabs.size)
+            Act.BOOKMARK -> {
+                val url = web().url ?: return false
+                if (!bookmarks.contains(url)) bookmarks.toggle(web().title.orEmpty(), url)
+                refreshStar()
+            }
+            Act.SHOW_BOOKMARKS -> showBookmarks()
+            Act.SHOW_HISTORY -> showList(BrowserData.pairs(context, "history"), R.string.no_history)
+            Act.ZOOM_IN -> web().zoomIn()
+            Act.ZOOM_OUT -> web().zoomOut()
+            Act.HOME_PAGE -> go(home())
+            else -> return false
+        }
+        return true
     }
 
     address.setOnKeyListener { _, code, event ->
@@ -178,15 +278,32 @@ internal fun browser(context: Context, shell: Shell): SpatialApp {
                 refreshStar()
             }
             iconKey(R.drawable.ic_ui_files) { showBookmarks() }
+            iconKey(R.drawable.ic_ui_clock) { spoken(Act.SHOW_HISTORY) }
             iconKey(R.drawable.ic_ui_keyboard) { shell.open(com.nexus.xr.AppType.KEYBOARD) }
         }
         row { notice = this; visibility = View.GONE }
         addView(pages, LinearLayout.LayoutParams(-1, 0, 1f))
     }
-    tabs += newWeb()
-    show(0)
-    go(shell.pendingUrl() ?: "https://www.google.com")
+    val wanted = shell.pendingUrl()
+    val saved = if (shell.settings.restoreTabs) BrowserData.openTabs(context).take(MAX_TABS) else emptyList()
+    if (saved.isEmpty()) {
+        tabs += newWeb()
+        show(0)
+        go(wanted ?: home())
+    } else {
+        saved.forEach { url -> tabs += newWeb().also { it.loadUrl(url) } }
+        if (wanted != null && tabs.size < MAX_TABS) tabs += newWeb()
+        show(if (wanted != null) tabs.lastIndex else 0)
+        if (wanted != null) go(wanted)
+    }
     // The shell reaches an already open browser through the root view's tag.
     view.tag = { url: String -> go(url) }
-    return SpatialApp(view) { tabs.forEach { it.stopLoading(); it.destroy() }; tabs.clear() }
+    return SpatialApp(view) {
+        persist()
+        tabs.forEach { it.stopLoading(); it.destroy() }
+        tabs.clear()
+    }.also {
+        it.command = ::spoken
+        it.flush = ::persist
+    }
 }

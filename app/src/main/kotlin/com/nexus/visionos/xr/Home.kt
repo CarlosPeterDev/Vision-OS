@@ -25,6 +25,9 @@ internal fun home(context: Context, shell: Shell): SpatialApp {
     val exit = Entry(context.getString(R.string.exit_spatial), R.drawable.ic_ui_exit, intArrayOf(0xFF8A93A6.toInt(), 0xFF3B414F.toInt())) {
         shell.exit()
     }
+    fun site(name: String, url: String) = Entry(name, R.drawable.ic_ui_browser, intArrayOf(0xFF7C8CF8.toInt(), 0xFF2F3A8F.toInt())) {
+        shell.openUrl(url)
+    }
     // The calculator sits in the very middle of the first page.
     val pages = listOf(
         listOf(
@@ -32,7 +35,17 @@ internal fun home(context: Context, shell: Shell): SpatialApp {
             listOf(app(AppType.NOTES), app(AppType.CLOCK), app(AppType.CALCULATOR), app(AppType.MEDIA), app(AppType.ASSISTANT)),
             listOf(app(AppType.CAMERA), app(AppType.LAUNCHER), app(AppType.CENTER), app(AppType.SETTINGS))
         ),
-        listOf(listOf(app(AppType.KEYBOARD), app(AppType.TUTORIAL), exit))
+        listOf(
+            listOf(app(AppType.TASKS), app(AppType.CALENDAR), app(AppType.WEATHER), app(AppType.PAINT)),
+            listOf(app(AppType.CONVERTER), app(AppType.GAMES), app(AppType.VOICE), app(AppType.KEYBOARD)),
+            listOf(app(AppType.TUTORIAL), exit)
+        ),
+        // Websites, opened in the built-in browser, which keeps you signed in.
+        listOf(
+            listOf(site("Google", "https://www.google.com"), site("Wikipedia", "https://www.wikipedia.org"), site("Maps", "https://maps.google.com"), site("Translate", "https://translate.google.com")),
+            listOf(site("Facebook", "https://m.facebook.com"), site("WhatsApp Web", "https://web.whatsapp.com"), site("ChatGPT", "https://chatgpt.com"), site("Claude", "https://claude.ai"), site("GitHub", "https://github.com")),
+            listOf(site("X", "https://x.com"), site("Instagram", "https://www.instagram.com"), site("Reddit", "https://www.reddit.com"), site("Netflix", "https://www.netflix.com"))
+        )
     )
     var page = 0
     lateinit var status: TextView
@@ -72,7 +85,7 @@ internal fun home(context: Context, shell: Shell): SpatialApp {
     }
     show()
     Log.i("NexusXR", "Home built")
-    val stop = ticker(2000) { status.text = shell.statusLine() }
+    val stop = ticker(2000) { status.text = if (shell.settings.showStatus) shell.statusLine() else "" }
     return SpatialApp(view, stop)
 }
 
@@ -126,6 +139,7 @@ internal fun controlCenter(context: Context, shell: Shell): SpatialApp {
             tile(R.drawable.ic_ui_launcher, R.string.ctl_arrange) { shell.arrange() }
             tile(R.drawable.ic_ui_media, R.string.cinema) { shell.toggleCinema() }
             tile(R.drawable.ic_ui_tabs, R.string.ctl_headset, shell.isHeadset()) { shell.toggleHeadset() }
+            tile(R.drawable.ic_ui_mic, R.string.app_voice, shell.isListening()) { shell.toggleVoiceControl() }
         }
     }
     val view = context.vertical {
@@ -197,6 +211,71 @@ internal fun settingsApp(context: Context, shell: Shell): SpatialApp {
         stepper({ named(R.string.lens_spacing, "%.2f".format(settings.lensShift)) }, { settings.lensShift -= 0.01f }, { settings.lensShift += 0.01f })
         stepper({ named(R.string.lens_height, "%.2f".format(settings.lensHeight)) }, { settings.lensHeight -= 0.01f }, { settings.lensHeight += 0.01f })
         stepper({ named(R.string.lens_zoom, "%.2f".format(settings.lensZoom)) }, { settings.lensZoom -= 0.03f }, { settings.lensZoom += 0.03f })
+        heading(R.string.app_voice)
+        row(height = context.px(56)) {
+            option({ context.getString(if (shell.isListening()) R.string.voice_stop else R.string.voice_start) }) { shell.toggleVoiceControl() }
+            option({ named(R.string.voice_auto, onOff(settings.voiceAutoStart)) }) { settings.voiceAutoStart = !settings.voiceAutoStart }
+            option({ named(R.string.voice_language, choice(R.array.voice_languages, settings.voiceLanguage)) }) { settings.voiceLanguage = (settings.voiceLanguage + 1) % 3 }
+        }
+        row(height = context.px(56)) {
+            option({ named(R.string.voice_offline_only, onOff(settings.voiceOfflineOnly)) }) { settings.voiceOfflineOnly = !settings.voiceOfflineOnly }
+            option({ named(R.string.voice_wake, onOff(settings.wakeWord)) }) { settings.wakeWord = !settings.wakeWord }
+            option({ named(R.string.voice_ai, onOff(settings.voiceAi)) }) { settings.voiceAi = !settings.voiceAi }
+        }
+        text(context.getString(R.string.voice_privacy), 11f).alpha = 0.7f
+        row(height = context.px(46)) { option({ context.getString(R.string.voice_command_list) }) { shell.open(AppType.VOICE) } }
+        heading(R.string.section_windows)
+        row(height = context.px(56)) {
+            option({ named(R.string.free_resize, onOff(settings.freeResize)) }) { settings.freeResize = !settings.freeResize }
+            option({ named(R.string.palm_shortcuts, onOff(settings.palmShortcuts)) }) { settings.palmShortcuts = !settings.palmShortcuts }
+            option({ named(R.string.status_line, onOff(settings.showStatus)) }) { settings.showStatus = !settings.showStatus }
+        }
+        stepper({ named(R.string.window_distance, "%.2f m".format(settings.windowDistance)) }, { settings.windowDistance -= 0.15f }, { settings.windowDistance += 0.15f })
+        stepper({ named(R.string.text_size, "%.0f%%".format(settings.textScale * 100)) }, { settings.textScale -= 0.05f }, { settings.textScale += 0.05f })
+        stepper({ named(R.string.cursor_size, "%.1f".format(settings.cursorSize)) }, { settings.cursorSize -= 0.2f }, { settings.cursorSize += 0.2f })
+        stepper({ named(R.string.long_press_time, "%.2f s".format(settings.longPressMs / 1000f)) }, { settings.longPressMs -= 250 }, { settings.longPressMs += 250 })
+        text(context.getString(R.string.size_buttons_note), 11f).alpha = 0.7f
+        row(height = context.px(56)) {
+            option({ named(R.string.gpu_tracking, onOff(settings.gpuTracking)) }) {
+                settings.gpuTracking = !settings.gpuTracking
+                status.text = context.getString(R.string.restart_needed)
+            }
+        }
+        heading(R.string.app_browser)
+        row(height = context.px(56)) {
+            option({ named(R.string.search_engine, searchEngineName(settings.searchEngine)) }) { settings.searchEngine = (settings.searchEngine + 1) % 4 }
+            option({ named(R.string.restore_tabs, onOff(settings.restoreTabs)) }) { settings.restoreTabs = !settings.restoreTabs }
+            option({ named(R.string.save_history, onOff(settings.saveHistory)) }) { settings.saveHistory = !settings.saveHistory }
+        }
+        row(height = context.px(56)) {
+            option({ named(R.string.desktop_sites, onOff(settings.desktopSites)) }) { settings.desktopSites = !settings.desktopSites }
+            option({ named(R.string.third_party_cookies, onOff(settings.thirdPartyCookies)) }) { settings.thirdPartyCookies = !settings.thirdPartyCookies }
+        }
+        stepper({ named(R.string.web_text_size, "${settings.webTextZoom}%") }, { settings.webTextZoom -= 10 }, { settings.webTextZoom += 10 })
+        text(context.getString(R.string.browser_data_note), 11f).alpha = 0.7f
+        heading(R.string.section_data)
+        /** Destructive choices ask a second time on the same button. */
+        fun LinearLayout.careful(label: Int, action: () -> Unit) {
+            var armedAt = 0L
+            lateinit var button: android.widget.Button
+            button = key(context.getString(label), tint = 0xFF9A9A) {
+                val now = android.os.SystemClock.uptimeMillis()
+                if (armedAt == 0L || now - armedAt > 6000) {
+                    armedAt = now
+                    button.text = context.getString(R.string.press_again)
+                } else {
+                    armedAt = 0
+                    button.text = context.getString(label)
+                    action()
+                    status.text = context.getString(R.string.cleared)
+                }
+            }
+        }
+        row(height = context.px(56)) {
+            careful(R.string.clear_history) { BrowserData.clearHistory(context) }
+            careful(R.string.sign_out_all) { BrowserData.clearAll(context) }
+            careful(R.string.reset_settings) { settings.reset(); shell.settingsChanged(); refresh() }
+        }
         heading(R.string.section_feedback)
         row(height = context.px(56)) {
             option({ named(R.string.sounds, onOff(settings.sounds)) }) { settings.sounds = !settings.sounds }

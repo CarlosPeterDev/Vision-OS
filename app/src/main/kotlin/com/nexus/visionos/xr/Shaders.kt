@@ -128,7 +128,7 @@ object Shaders {
             base += line * (0.16 + 0.62 * lit) + pow(edge, 3.0) * 0.10 * (0.4 + lit);
             if (uQuality > 0) base += 0.075 * smoothstep(0.30, 0.0, abs(vUv.x * 0.55 + (1.0 - vUv.y) - 0.30));
             base += uFocus * (0.07 + line * 0.25);
-            float a = alpha * (uQuality > 0 ? 0.97 : 0.94) * uAlpha;
+            float a = alpha * (uQuality > 0 ? 0.975 : 0.99) * uAlpha;
             color = vec4(base * a, a);
         }
     """

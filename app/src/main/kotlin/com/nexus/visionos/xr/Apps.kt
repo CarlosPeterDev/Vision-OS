@@ -19,6 +19,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
 import com.nexus.visionos.R
+import com.nexus.xr.Act
 import com.nexus.xr.AppType
 import com.nexus.xr.Calculator
 import com.nexus.xr.WordSuggester
@@ -29,7 +30,7 @@ fun buildApp(context: Context, type: AppType, shell: Shell): SpatialApp = when (
     AppType.BROWSER -> browser(context, shell)
     AppType.NOTES -> notes(context, shell)
     AppType.CALCULATOR -> calculator(context)
-    AppType.CLOCK -> clock(context)
+    AppType.CLOCK -> clock(context, shell)
     AppType.MEDIA -> media(context, shell)
     AppType.SETTINGS -> settingsApp(context, shell)
     AppType.ASSISTANT -> shell.assistant(context)
@@ -40,6 +41,13 @@ fun buildApp(context: Context, type: AppType, shell: Shell): SpatialApp = when (
     AppType.FILES -> files(context, shell)
     AppType.CAMERA -> captureApp(context, shell)
     AppType.LAUNCHER -> appLauncher(context, shell)
+    AppType.TASKS -> tasksApp(context, shell)
+    AppType.CALENDAR -> calendarApp(context)
+    AppType.PAINT -> paintApp(context)
+    AppType.CONVERTER -> converterApp(context, shell)
+    AppType.GAMES -> gamesApp(context)
+    AppType.WEATHER -> weatherApp(context, shell)
+    AppType.VOICE -> voiceApp(context, shell)
 }
 
 private fun notes(context: Context, shell: Shell): SpatialApp {
@@ -64,7 +72,7 @@ private fun notes(context: Context, shell: Shell): SpatialApp {
         row(height = context.px(52)) { iconKey(R.drawable.ic_ui_keyboard) { input.requestFocus(); shell.open(AppType.KEYBOARD) } }
     }
     input.requestFocus()
-    return SpatialApp(view) { handler.removeCallbacks(autosave); save() }
+    return SpatialApp(view) { handler.removeCallbacks(autosave); save() }.also { it.flush = ::save }
 }
 
 private fun calculator(context: Context): SpatialApp {
@@ -115,10 +123,9 @@ private fun calculator(context: Context): SpatialApp {
     return SpatialApp(view)
 }
 
-private fun clock(context: Context): SpatialApp {
+private fun clock(context: Context, shell: Shell): SpatialApp {
     var startedAt = 0L
     var elapsed = 0L
-    var timerEnd = 0L
     lateinit var watch: TextView
     lateinit var timer: TextView
     val view = context.vertical {
@@ -136,14 +143,15 @@ private fun clock(context: Context): SpatialApp {
         }
         timer = text(size = 26f)
         row(1f) {
-            for (minutes in listOf(1, 5, 10, 25)) key("$minutes′") { timerEnd = SystemClock.elapsedRealtime() + minutes * 60_000L }
-            iconKey(R.drawable.ic_ui_close) { timerEnd = 0 }
+            for (minutes in listOf(1, 5, 10, 25)) key("$minutes′") { shell.setTimer(minutes) }
+            iconKey(R.drawable.ic_ui_close) { shell.setTimer(0) }
         }
     }
     val stop = ticker(100) {
         val now = SystemClock.elapsedRealtime()
         val total = elapsed + if (startedAt > 0) now - startedAt else 0
         watch.text = context.getString(R.string.stopwatch) + "  %02d:%02d.%d".format(total / 60000, total / 1000 % 60, total / 100 % 10)
+        val timerEnd = shell.timerEndsAt()
         val left = (timerEnd - now).coerceAtLeast(0)
         timer.text = context.getString(R.string.timer) + "  " + when {
             timerEnd == 0L -> "--:--"
@@ -180,7 +188,17 @@ private fun media(context: Context, shell: Shell): SpatialApp {
             status.text = ""
         }
     }
-    return SpatialApp(view) { stop(); video.stopPlayback() }
+    return SpatialApp(view) { stop(); video.stopPlayback() }.also {
+        it.command = { act ->
+            when (act) {
+                Act.PLAY -> video.start()
+                Act.PAUSE -> video.pause()
+                Act.SKIP -> video.seekTo(video.currentPosition + 10_000)
+                Act.REWIND -> video.seekTo((video.currentPosition - 10_000).coerceAtLeast(0))
+                else -> null
+            } != null
+        }
+    }
 }
 
 private fun keyboard(context: Context, shell: Shell): SpatialApp {

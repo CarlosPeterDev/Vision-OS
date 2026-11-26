@@ -56,8 +56,20 @@ wait_for "Photo saved" 60
 wait_for "Recording saved" 60
 adb exec-out screencap -p > smoke/app-camera.png
 adb logcat -d > smoke/logcat-capture.txt
+# Sentences go through the same path as the microphone (recognition itself is not covered here):
+# typing into a field, then reshaping the window, which must keep what was typed.
+adb shell am force-stop $PKG
+adb logcat -c
+adb shell "am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --es say 'open notes|type hello from voice control|wider|wider|shorter'"
+wait_for "Command Type done" 60
+wait_for "Command Do done" 60
+sleep 25
+adb exec-out screencap -p > smoke/voice-typing.png
+if [ "$(adb logcat -d -s NexusXR | grep -c 'Command Do done')" -ge 3 ]; then echo "PASS: window reshaped three times"; else echo "FAIL: reshape commands"; fail=1; fi
+if adb logcat -d -s NexusXR | grep -q "Resizing nexus-.* failed"; then echo "FAIL: reshaping failed"; fail=1; fi
+adb logcat -d > smoke/logcat-voice.txt
 # Screens of other windows, for review.
-for apps in CENTER SETTINGS BROWSER PHOTOS FILES LAUNCHER KEYBOARD; do
+for apps in CENTER SETTINGS BROWSER PHOTOS FILES LAUNCHER KEYBOARD TASKS CALENDAR PAINT CONVERTER GAMES WEATHER VOICE; do
   adb shell am force-stop $PKG
   adb shell am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --es open $apps
   sleep 22
@@ -71,7 +83,7 @@ adb shell am force-stop $PKG
 adb shell am start -W -n $PKG/.MainActivity; sleep 8
 adb exec-out screencap -p > smoke/start-screen.png
 adb logcat -d > smoke/logcat-last.txt
-cat smoke/logcat-capture.txt smoke/logcat-last.txt > smoke/logcat.txt
+cat smoke/logcat-capture.txt smoke/logcat-voice.txt smoke/logcat-last.txt > smoke/logcat.txt
 grep -E "NexusXR|FATAL EXCEPTION" smoke/logcat.txt > smoke/summary.txt
 grep -q "FATAL EXCEPTION" smoke/logcat.txt && { echo "FAIL: crash detected"; fail=1; }
 exit $fail

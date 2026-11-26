@@ -21,6 +21,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.nexus.xr.*
@@ -65,7 +66,7 @@ class HeadTracker(context: Context) : SensorEventListener {
 class HandFrame(val hands: List<Hand>, val aspect: Float, val timeMs: Long, val latencyMs: Long)
 
 /** MediaPipe Hand Landmarker in live-stream mode. At most one frame is in flight. */
-class HandTracker(context: Context) : ImageAnalysis.Analyzer {
+class HandTracker(private val context: Context, wantGpu: Boolean) : ImageAnalysis.Analyzer {
     @Volatile var latest: HandFrame? = null
         private set
     @Volatile var error: String? = null
@@ -78,13 +79,45 @@ class HandTracker(context: Context) : ImageAnalysis.Analyzer {
 
     private val identity = HandIdentity()
     @Volatile private var busySince = 0L
+    private val guard = context.getSharedPreferences("gpu_guard", Context.MODE_PRIVATE)
+    /**
+     * A broken GPU driver can crash the app without an exception. A flag is written before the GPU
+     * is tried and cleared on its first result, so a crash makes the next launch use the CPU.
+     */
+    var gpu = wantGpu && !guard.getBoolean("unfinished", false)
+        private set
+    /** True when the GPU was asked for but crashed the app last time. */
+    val gpuCrashed = wantGpu && !gpu
+    @Volatile private var proven = false
     private var lastSubmit = 0L
     @Volatile private var aspect = 4f / 3f
     private var closed = false
 
-    private val landmarker: HandLandmarker? = try {
+    private val landmarker: HandLandmarker? = create()
+
+    private fun create(): HandLandmarker? {
+        if (gpu) {
+            guard.edit().putBoolean("unfinished", true).commit()
+            try {
+                return build(Delegate.GPU)
+            } catch (t: Throwable) {
+                Log.w("NexusXR", "GPU hand tracking unavailable, using the CPU", t)
+                guard.edit().remove("unfinished").apply()
+                gpu = false
+            }
+        }
+        return try {
+            build(Delegate.CPU)
+        } catch (t: Throwable) { // includes missing native libraries
+            Log.e("NexusXR", "Hand landmarker failed", t)
+            error = t.message ?: t.javaClass.simpleName
+            null
+        }
+    }
+
+    private fun build(delegate: Delegate): HandLandmarker {
         val options = HandLandmarker.HandLandmarkerOptions.builder()
-            .setBaseOptions(BaseOptions.builder().setModelAssetPath("hand_landmarker.task").build())
+            .setBaseOptions(BaseOptions.builder().setModelAssetPath("hand_landmarker.task").setDelegate(delegate).build())
             .setRunningMode(RunningMode.LIVE_STREAM)
             .setNumHands(2)
             .setMinHandDetectionConfidence(0.5f)
@@ -92,6 +125,10 @@ class HandTracker(context: Context) : ImageAnalysis.Analyzer {
             .setMinTrackingConfidence(0.5f)
             .setResultListener { result, _ ->
                 if (latest == null) Log.i("NexusXR", "First hand tracking result")
+                if (!proven) {
+                    proven = true
+                    if (gpu) guard.edit().remove("unfinished").apply()
+                }
                 val now = SystemClock.uptimeMillis()
                 val hands = result.landmarks().map { list -> list.map { Point(it.x(), it.y()) } }
                 // MediaPipe names hands assuming a mirrored selfie image; the back camera is not mirrored.
@@ -107,11 +144,7 @@ class HandTracker(context: Context) : ImageAnalysis.Analyzer {
             }
             .setErrorListener { error = it.message; busySince = 0 }
             .build()
-        HandLandmarker.createFromOptions(context, options).also { Log.i("NexusXR", "Hand landmarker ready") }
-    } catch (t: Throwable) { // includes missing native libraries
-        Log.e("NexusXR", "Hand landmarker failed", t)
-        error = t.message ?: t.javaClass.simpleName
-        null
+        return HandLandmarker.createFromOptions(context, options).also { Log.i("NexusXR", "Hand landmarker ready ($delegate)") }
     }
 
     override fun analyze(image: ImageProxy) {
@@ -143,6 +176,7 @@ class HandTracker(context: Context) : ImageAnalysis.Analyzer {
 
     @Synchronized fun close() {
         closed = true
+        if (gpu && !proven) guard.edit().remove("unfinished").apply()
         landmarker?.close()
     }
 }
