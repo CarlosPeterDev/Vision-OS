@@ -352,16 +352,6 @@ class XrRenderer(
             drawQuad(textureProgram, win, halfW - bar, -halfH - bar, halfW, -halfH)
         }
 
-        if (frames == 0) {
-            val centres = s.windows.joinToString { win ->
-                val c = win.center
-                val clip = FloatArray(4)
-                Matrix.multiplyMV(clip, 0, viewProjection, 0, floatArrayOf(c.x, c.y, c.z, 1f), 0)
-                "%s ndc=(%.2f,%.2f) w=%.2f".format(win.app, clip[0] / clip[3], clip[1] / clip[3], clip[3])
-            }
-            Log.d("NexusXR", "draw n=${s.windows.size} fov=%.1f aspect=%.2f err=${glGetError()} $centres".format(viewFov(s, aspect), aspect))
-        }
-
         drawHands(s)
 
         for (cursor in s.cursors) {
@@ -446,7 +436,7 @@ class XrRenderer(
             canvas.drawText(title, h * 0.4f, h * 0.7f, paint)
             paint.textAlign = Paint.Align.CENTER
             // Same order as hitTest: close, minimize, farther, nearer, from the right.
-            listOf("✕", "—", "−", "+").forEachIndexed { i, glyph ->
+            listOf("✕", "⌄", "−", "+").forEachIndexed { i, glyph ->
                 canvas.drawText(glyph, w - h * (i + 0.5f), h * 0.7f, paint)
             }
         }
