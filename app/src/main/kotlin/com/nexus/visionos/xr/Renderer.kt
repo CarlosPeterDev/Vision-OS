@@ -433,7 +433,13 @@ class XrRenderer(
         val texture = textTexture(w, h) { canvas, paint ->
             paint.textSize = h * 0.55f
             paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            // Shrink long titles so narrow windows do not draw them under the buttons.
+            val baseSize = paint.textSize
+            val room = w - h * 4.6f
+            val length = paint.measureText(title)
+            if (length > room) paint.textSize = baseSize * (room / length).coerceAtLeast(0.1f)
             canvas.drawText(title, h * 0.4f, h * 0.7f, paint)
+            paint.textSize = baseSize
             paint.textAlign = Paint.Align.CENTER
             // Same order as hitTest: close, minimize, farther, nearer, from the right.
             listOf("✕", "⌄", "−", "+").forEachIndexed { i, glyph ->

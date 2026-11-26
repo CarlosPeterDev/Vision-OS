@@ -80,7 +80,9 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { name: dist, path: dist }
       - uses: actions/download-artifact@v4
-        with: { name: smoke, path: dist }
+        with: { name: smoke, path: smoke }
+      # Emulator screenshots and the app's own log lines; the full system log stays in the run artifact.
+      - run: cp smoke/*.png smoke/summary.txt dist/
       - name: Publish development release
         env:
           GH_TOKEN: ${{ github.token }}
