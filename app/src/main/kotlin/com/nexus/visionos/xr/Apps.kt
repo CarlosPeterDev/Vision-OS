@@ -2,6 +2,7 @@ package com.nexus.visionos.xr
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Color
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
