@@ -23,15 +23,42 @@ jobs:
         run: gradle :audio-engine:test :ai-assistant:test :xr-engine:test --stacktrace
       - name: Lint
         run: gradle :app:lintDebug --stacktrace
-      - name: Build development APK
-        run: gradle :app:assembleDebug --stacktrace
+      # With the two signing secrets set, a release APK and AAB are built with that fixed key.
+      # Without them, a debug APK is built, which is signed with a new key every time.
+      - name: Prepare signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.NEXUS_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.NEXUS_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
+            echo "$KEYSTORE_BASE64" | tr -d ' \r\n' | base64 -d > "$RUNNER_TEMP/nexus.jks"
+            echo "NEXUS_KEYSTORE_FILE=$RUNNER_TEMP/nexus.jks" >> "$GITHUB_ENV"
+          fi
+      - name: Build APK
+        env:
+          NEXUS_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "${NEXUS_KEYSTORE_FILE:-}" ]; then
+            gradle :app:assembleRelease :app:bundleRelease --stacktrace
+          else
+            gradle :app:assembleDebug --stacktrace
+          fi
       - name: Verify and checksum
         run: |
           mkdir dist
-          apk="dist/NexusVisionOS-0.1.${GITHUB_RUN_NUMBER}-dev.apk"
-          cp app/build/outputs/apk/debug/app-debug.apk "$apk"
+          if [ -n "${NEXUS_KEYSTORE_FILE:-}" ]; then
+            apk="dist/NexusVisionOS-0.1.${GITHUB_RUN_NUMBER}.apk"
+            cp app/build/outputs/apk/release/app-release.apk "$apk"
+            cp app/build/outputs/bundle/release/app-release.aab "dist/NexusVisionOS-0.1.${GITHUB_RUN_NUMBER}.aab"
+            echo "Signed with the fixed key. It installs over an earlier build made with the same key." > dist/SIGNING.txt
+          else
+            apk="dist/NexusVisionOS-0.1.${GITHUB_RUN_NUMBER}-dev.apk"
+            cp app/build/outputs/apk/debug/app-debug.apk "$apk"
+            echo "Debug-signed with a one-time key. Uninstall the earlier build first; this deletes app data." > dist/SIGNING.txt
+          fi
           "$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner" verify "$apk"
-          (cd dist && sha256sum ./*.apk > SHA256SUMS.txt)
+          (cd dist && find . -maxdepth 1 \( -name '*.apk' -o -name '*.aab' \) -exec sha256sum {} + > SHA256SUMS.txt)
+          rm -f "$RUNNER_TEMP/nexus.jks"
       - uses: actions/upload-artifact@v4
         with: { name: dist, path: dist/ }
 
@@ -90,4 +117,4 @@ jobs:
           gh release create "v0.1.${GITHUB_RUN_NUMBER}-dev" dist/* \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest \
             --title "Nexus Vision OS 0.1.${GITHUB_RUN_NUMBER} (development build)" \
-            --notes "Debug-signed development APK, not production signed. Each build has a different signing key, so uninstall the previous build first (this deletes saved API keys). Not yet validated on a physical device."
+            --notes "Development build. $(cat dist/SIGNING.txt) Not yet validated on a physical device."

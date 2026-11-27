@@ -15,6 +15,20 @@ android {
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionName = "0.1.${System.getenv("GITHUB_RUN_NUMBER") ?: "0"}"
     }
+    // A fixed key from the build environment lets updates install over the old app and keep its data.
+    // The key file is never part of the repository.
+    val keystore = System.getenv("NEXUS_KEYSTORE_FILE")
+    if (!keystore.isNullOrBlank()) {
+        signingConfigs {
+            create("nexus") {
+                storeFile = file(keystore)
+                storePassword = System.getenv("NEXUS_KEYSTORE_PASSWORD")
+                keyAlias = "nexus"
+                keyPassword = System.getenv("NEXUS_KEYSTORE_PASSWORD")
+            }
+        }
+        buildTypes { getByName("release") { signingConfig = signingConfigs.getByName("nexus") } }
+    }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
     androidResources { noCompress += "task" }

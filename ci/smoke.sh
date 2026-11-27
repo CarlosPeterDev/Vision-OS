@@ -86,4 +86,5 @@ adb logcat -d > smoke/logcat-last.txt
 cat smoke/logcat-capture.txt smoke/logcat-voice.txt smoke/logcat-last.txt > smoke/logcat.txt
 grep -E "NexusXR|FATAL EXCEPTION" smoke/logcat.txt > smoke/summary.txt
 grep -q "FATAL EXCEPTION" smoke/logcat.txt && { echo "FAIL: crash detected"; fail=1; }
+if grep -q "Immersive view halted" smoke/logcat.txt; then echo "NOTE: the camera safety stop appeared during this run"; fi
 exit $fail

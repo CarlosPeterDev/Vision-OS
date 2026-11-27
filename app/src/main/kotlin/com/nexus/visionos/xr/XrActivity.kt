@@ -322,6 +322,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     /** Leaves immersive viewing and says why. The camera view is never left frozen. */
     private fun halt(reason: String) {
         if (halted != null) return
+        Log.w("NexusXR", "Immersive view halted")
         stopRecording()
         halted = reason
         stereo = false
@@ -373,7 +374,12 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         hands.swapSides = settings.swapHandSides
         val passthrough = settings.passthrough
         val lastFrame = renderer.lastCameraFrameMs
-        if (passthrough && cameraRunning && now - maxOf(lastFrame, cameraStartedAt) > if (lastFrame < cameraStartedAt) FIRST_FRAME_MS else if (recording != null || now < captureGraceUntil) 6000 else 1500) {
+        // The camera has failed when the app keeps drawing but no new picture arrives. When the whole
+        // phone stalls, for example while a heavy web page loads, nothing is drawn either.
+        val started = lastFrame >= cameraStartedAt
+        val silent = now - maxOf(lastFrame, cameraStartedAt)
+        val limit = if (!started) FIRST_FRAME_MS else if (recording != null || now < captureGraceUntil) 6000L else 2000L
+        if (passthrough && cameraRunning && silent > limit && (!started || renderer.framesWithoutCamera >= STALL_FRAMES)) {
             halt(getString(R.string.camera_stalled))
         }
 
@@ -1242,6 +1248,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         private const val TOUCH_POINTER = 100
         private const val GAZE_POINTER = 101
         private const val VOICE_POINTER = 102
+        private const val STALL_FRAMES = 20
         private val WAKE_WORDS = setOf("nexus", "نكسس", "نيكسس", "نكزس")
         private const val CINEMA_DIM = 0.7f
         private const val SETTLE_MS = 1500L

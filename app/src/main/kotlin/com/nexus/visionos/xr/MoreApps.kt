@@ -265,10 +265,10 @@ internal fun converterApp(context: Context, shell: Shell): SpatialApp {
             toButton = key("") { to = (to + 1) % units().size; update() }
         }
         result = text("", 24f).apply { gravity = Gravity.CENTER; textDirection = View.TEXT_DIRECTION_LTR }
-        row(1f) {
+        for (digits in listOf("123456", "7890.")) row(1f) {
             layoutDirection = View.LAYOUT_DIRECTION_LTR
-            for (c in "1234567890.") key(c.toString()) { input.append(c.toString()) }
-            iconKey(R.drawable.ic_ui_delete) { val t = input.text; if (t.isNotEmpty()) t.delete(t.length - 1, t.length) }
+            for (c in digits) key(c.toString()) { input.append(c.toString()) }
+            if ('.' in digits) iconKey(R.drawable.ic_ui_delete) { val t = input.text; if (t.isNotEmpty()) t.delete(t.length - 1, t.length) }
         }
     }
     input.addTextChangedListener(object : TextWatcher {

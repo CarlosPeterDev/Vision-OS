@@ -74,6 +74,9 @@ class XrRenderer(
 ) : GLSurfaceView.Renderer {
     @Volatile var scene = Scene()
     @Volatile var lastCameraFrameMs = 0L
+    /** Frames drawn since the camera last delivered one. */
+    @Volatile var framesWithoutCamera = 0
+        private set
         private set
     @Volatile var fps = 0
         private set
@@ -242,6 +245,7 @@ class XrRenderer(
         val e = external(request.resolution.width, request.resolution.height) {
             if (lastCameraFrameMs == 0L) Log.i("NexusXR", "First camera frame")
             lastCameraFrameMs = android.os.SystemClock.uptimeMillis()
+            framesWithoutCamera = 0
         }
         camera = e
         cameraRequest = request
@@ -255,6 +259,7 @@ class XrRenderer(
         val s = scene
         val q = head()
         countFrame()
+        framesWithoutCamera++
         slots.values.forEach { it.external?.latch() }
         runCatching { camera?.latch() }.onFailure { Log.w("NexusXR", "Camera frame skipped", it) }
 
