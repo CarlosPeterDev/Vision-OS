@@ -129,6 +129,18 @@ adb shell "am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --es say 'next
 if wait_for "Command Do done" 60; then sleep 6; fi
 adb exec-out screencap -p > smoke/new-place.png
 adb logcat -d >> smoke/logcat-batch2.txt
+# Touch a day in the calendar: its event list must open without a crash.
+adb shell am force-stop $PKG
+adb logcat -c
+adb shell am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --es open CALENDAR
+if wait_for "Windows placed" 60; then
+  sleep 20
+  adb shell input swipe $((W * 575 / 1000)) $((H * 575 / 1000)) $((W * 575 / 1000)) $((H * 575 / 1000)) 600
+  sleep 8
+  adb exec-out screencap -p > smoke/calendar-day.png
+fi
+if adb logcat -d | grep -q "FATAL EXCEPTION" || ! adb shell pidof $PKG > /dev/null; then echo "FAIL: calendar day view crashed"; fail=1; else echo "PASS: calendar day view"; fi
+adb logcat -d >> smoke/logcat-batch2.txt
 # The recording badge must reach both eyes too.
 adb shell am force-stop $PKG
 adb logcat -c

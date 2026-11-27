@@ -26,6 +26,15 @@ Download the APK from the latest [release](../../releases). It needs Android 10 
   save a copy to Downloads. A chosen phone folder can be browsed read-only.
 - **Apps:** photos, photo and video capture (no sound), notes, tasks, calendar, calculator,
   converter, paint, games, weather, clock, media player, keyboard (EN/AR), Nexus assistant.
+- **Spaces and voice shortcuts:** three saved sets of windows (work, study, cinema), and your own
+  phrases that each run up to eight built-in commands. Risky steps still ask first.
+- **Reminders and calendar:** add events with a reminder, or say "remind me in 10 minutes to ...".
+  They are stored on the phone; with notification permission they also arrive when spatial mode is
+  closed (Android may be a few minutes late). An event can be copied to the phone's calendar.
+- **Player:** several files as a playlist, SRT/VTT subtitle files with timing adjustment, and a
+  large or very large curved screen.
+- **Places:** dusk, night, mountains, ocean, cinema hall, deep space, beach, or your own 360° photo.
+- **3D interface sound** (left/right, needs headphones) and an opening animation.
 - **Headset screen fit:** move each eye's picture on its own, change the gap, width and height with
   buttons, by dragging with a finger (two fingers resize, double tap finishes) or by voice ("wider
   gap", "screens closer", "bigger screens"). Messages and the listening and recording badges are
@@ -57,6 +66,10 @@ physical phone.**
 | Release signing with your key | **Not tested** until the secrets are added |
 | Screen fit by voice, messages drawn in both eyes | Emulator screenshot |
 | Moving screens by finger drag | **Not tested** |
+| Example voice shortcut, study space, spoken 1-minute reminder, new places | Emulator |
+| Reminder notification with spatial mode closed or after a restart | **Not tested** |
+| Subtitles, playlist, own 360° photo, copying to the phone calendar | **Not tested on Android** (subtitle reading has unit tests) |
+| 3D sound by ear | **Not tested** |
 | Headset optics and comfort | **Not tested**; experimental, seated use only |
 
 ## Limits
