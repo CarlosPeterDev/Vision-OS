@@ -155,6 +155,10 @@
         <item>Night</item>
         <item>Mountains</item>
         <item>Ocean</item>
+        <item>Cinema hall</item>
+        <item>Deep space</item>
+        <item>Beach</item>
+        <item>My 360° photo</item>
     </string-array>
     <string-array name="glass_levels">
         <item>Low</item>
@@ -328,4 +332,41 @@
     <string name="fit_help">Close one eye at a time and move that picture until it is centred in its lens. Then open both eyes and change the gap until you see one clear picture. If your eyes feel strain, take the headset off.</string>
     <string name="fit_drag_help">Drag each picture with a finger\nTwo fingers: resize\nDouble tap: finish</string>
     <string name="fit_saved">Screen position saved</string>
+    <string name="app_spaces">Spaces & shortcuts</string>
+    <string name="reminders">Reminders</string>
+    <string name="reminder">Reminder</string>
+    <string name="reminder_set">I will remind you in %1$d minutes: %2$s</string>
+    <string name="reminder_no_notifications">Without notification permission, reminders appear only while spatial mode is open</string>
+    <string name="no_calendar_app">No calendar app can open this</string>
+    <string name="event_hint">What should I remind you about?</string>
+    <string name="event_add">Add with reminder</string>
+    <string name="event_to_phone">Copy to the phone calendar</string>
+    <string name="event_note">Reminders stay on this phone. Android may send them a few minutes late.</string>
+    <string name="video_of">%1$d of %2$d</string>
+    <string name="subtitle_shift">Subtitles %1$s s</string>
+    <string name="subtitles">Subtitles file</string>
+    <string name="screen_size">Screen size</string>
+    <string name="subtitles_failed">That file has no subtitles I can read (SRT or VTT)</string>
+    <string name="subtitles_loaded">Subtitles loaded: %1$d lines</string>
+    <string name="photo_place">Use my own 360° photo</string>
+    <string name="photo_place_failed">I could not open that picture</string>
+    <string name="photo_place_ready">Your 360° place is ready. A 2:1 360° photo looks right; a normal photo is stretched.</string>
+    <string name="spatial_sound">3D sound (headphones)</string>
+    <string name="spaces_title">Workspaces: open one, or save the windows you have now into it</string>
+    <string name="space_work">Work</string>
+    <string name="space_study">Study</string>
+    <string name="space_cinema">Cinema</string>
+    <string name="space_save">Save current</string>
+    <string name="space_saved">Saved to %1$s</string>
+    <string name="space_empty">Open some windows first</string>
+    <string name="routines_title">My voice shortcuts</string>
+    <string name="routines_help">One per line: name = command; command; command. Say the name to run it.</string>
+    <string name="routines_save">Save shortcuts</string>
+    <string name="routine_line">Line %1$d:</string>
+    <string name="routine_format">write it as name = command; command</string>
+    <string name="routine_taken">this name is already used:</string>
+    <string name="routine_unknown">unknown command:</string>
+    <string name="routine_too_many">too many:</string>
+    <string name="routines_example">morning routine = open browser; open tasks; arrange windows</string>
+    <string name="event_icons">The calendar button copies an event to the phone calendar.</string>
 </resources>

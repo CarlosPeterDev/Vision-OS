@@ -32,7 +32,7 @@ internal fun home(context: Context, shell: Shell): SpatialApp {
         listOf(
             listOf(app(AppType.TASKS), app(AppType.CALENDAR), app(AppType.WEATHER), app(AppType.PAINT)),
             listOf(app(AppType.CONVERTER), app(AppType.GAMES), app(AppType.VOICE), app(AppType.KEYBOARD)),
-            listOf(app(AppType.TUTORIAL), exit)
+            listOf(app(AppType.TUTORIAL), app(AppType.SPACES), exit)
         )
     )
     var page = 0
@@ -117,7 +117,7 @@ internal fun controlCenter(context: Context, shell: Shell): SpatialApp {
                 settings.passthrough = !settings.passthrough; shell.settingsChanged()
             }
             tile(R.drawable.ic_ui_photos, R.string.next_scene) {
-                settings.scene = (settings.scene + 1) % 4; settings.passthrough = false; shell.settingsChanged()
+                settings.scene = Places.next(context, settings.scene); settings.passthrough = false; shell.settingsChanged()
             }
             tile(R.drawable.ic_ui_farther, R.string.dim_less) { settings.dim -= 0.2f }
             tile(R.drawable.ic_ui_nearer, R.string.dim_more) { settings.dim += 0.2f }
@@ -160,9 +160,10 @@ internal fun settingsApp(context: Context, shell: Shell): SpatialApp {
         heading(R.string.section_view)
         row(height = context.px(56)) {
             option({ context.getString(if (settings.passthrough) R.string.env_camera else R.string.env_virtual) }) { settings.passthrough = !settings.passthrough }
-            option({ named(R.string.scene, choice(R.array.scenes, settings.scene)) }) { settings.scene = (settings.scene + 1) % 4 }
+            option({ named(R.string.scene, choice(R.array.scenes, settings.scene)) }) { settings.scene = Places.next(context, settings.scene) }
             option({ named(R.string.ctl_glass, choice(R.array.glass_levels, settings.quality)) }) { settings.quality = (settings.quality + 1) % 3 }
         }
+        row(height = context.px(52)) { key(context.getString(R.string.photo_place)) { shell.pickPhotoPlace() } }
         row(height = context.px(56)) {
             option({ named(R.string.ctl_hands, onOff(settings.showHands)) }) { settings.showHands = !settings.showHands }
             option({ named(R.string.occlusion, onOff(settings.occlusion)) }) { settings.occlusion = !settings.occlusion }
@@ -264,6 +265,9 @@ internal fun settingsApp(context: Context, shell: Shell): SpatialApp {
             careful(R.string.reset_settings) { settings.reset(); shell.settingsChanged(); refresh() }
         }
         heading(R.string.section_feedback)
+        row(height = context.px(52)) {
+            option({ named(R.string.spatial_sound, onOff(settings.spatialSound)) }) { settings.spatialSound = !settings.spatialSound }
+        }
         row(height = context.px(56)) {
             option({ named(R.string.sounds, onOff(settings.sounds)) }) { settings.sounds = !settings.sounds }
             option({ named(R.string.vibration, onOff(settings.haptics)) }) { settings.haptics = !settings.haptics }

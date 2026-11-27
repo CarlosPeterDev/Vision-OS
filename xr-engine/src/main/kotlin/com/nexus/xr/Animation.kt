@@ -22,7 +22,8 @@ class AnimatedWindow(val window: SpatialWindow, val alpha: Float)
 class WindowAnimator {
     private class State(var window: SpatialWindow) {
         val yaw = Spring(window.yaw)
-        val pitch = Spring(window.pitch)
+        // A new window rises into place.
+        val pitch = Spring(window.pitch - 0.07f)
         val distance = Spring(window.distance)
         val scale = Spring(window.scale * 0.82f)
         val alpha = Spring(0f)
@@ -52,7 +53,7 @@ class WindowAnimator {
                 s.yaw.snap(yawTarget); s.pitch.snap(t.pitch); s.distance.snap(t.distance)
                 s.scale.snap(scaleTarget); s.alpha.snap(alphaTarget)
             } else {
-                s.yaw.step(yawTarget, step, omega); s.pitch.step(t.pitch, step, omega)
+                s.yaw.step(yawTarget, step, omega); s.pitch.step(if (leaving) t.pitch - 0.05f else t.pitch, step, omega)
                 s.distance.step(t.distance, step, omega); s.scale.step(scaleTarget, step, omega)
                 s.alpha.step(alphaTarget, step, omega)
             }

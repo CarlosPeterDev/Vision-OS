@@ -155,6 +155,10 @@
         <item>ليل</item>
         <item>جبال</item>
         <item>بحر</item>
+        <item>صالة سينما</item>
+        <item>الفضاء</item>
+        <item>الشاطئ</item>
+        <item>صورتي 360°</item>
     </string-array>
     <string-array name="glass_levels">
         <item>خفيف</item>
@@ -328,4 +332,41 @@
     <string name="fit_help">غمّض عين وحرّك صورة العين التانية لحد ما تبقى في نص العدسة، وكرر مع العين التانية. بعدين افتح الاتنين وغيّر المسافة لحد ما تشوف صورة واحدة واضحة. لو عينك تعبت اقلع النضارة.</string>
     <string name="fit_drag_help">اسحب كل صورة بصباعك\nبصباعين: كبّر أو صغّر\nدوستين: خلاص</string>
     <string name="fit_saved">اتحفظ مكان الشاشتين</string>
+    <string name="app_spaces">المساحات والاختصارات</string>
+    <string name="reminders">التذكيرات</string>
+    <string name="reminder">تذكير</string>
+    <string name="reminder_set">هفكرك بعد %1$d دقيقة: %2$s</string>
+    <string name="reminder_no_notifications">من غير إذن الإشعارات، التذكير هيظهر بس والوضع المكاني مفتوح</string>
+    <string name="no_calendar_app">مفيش تطبيق تقويم يفتح ده</string>
+    <string name="event_hint">أفكرك بإيه؟</string>
+    <string name="event_add">ضيف بتذكير</string>
+    <string name="event_to_phone">انسخه لتقويم الموبايل</string>
+    <string name="event_note">التذكيرات محفوظة على الموبايل بس. أندرويد ممكن يتأخر كام دقيقة.</string>
+    <string name="video_of">%1$d من %2$d</string>
+    <string name="subtitle_shift">الترجمة %1$s ث</string>
+    <string name="subtitles">ملف الترجمة</string>
+    <string name="screen_size">حجم الشاشة</string>
+    <string name="subtitles_failed">مقدرتش أقرا ترجمة من الملف ده (SRT أو VTT)</string>
+    <string name="subtitles_loaded">الترجمة اتحملت: %1$d سطر</string>
+    <string name="photo_place">استخدم صورة 360° بتاعتي</string>
+    <string name="photo_place_failed">مقدرتش أفتح الصورة</string>
+    <string name="photo_place_ready">المكان جاهز. صورة 360° بنسبة 2:1 هتبان صح، والصورة العادية هتتمط.</string>
+    <string name="spatial_sound">صوت ثلاثي الأبعاد (بالسماعة)</string>
+    <string name="spaces_title">مساحات العمل: افتح واحدة، أو احفظ الشبابيك المفتوحة فيها</string>
+    <string name="space_work">الشغل</string>
+    <string name="space_study">المذاكرة</string>
+    <string name="space_cinema">السينما</string>
+    <string name="space_save">احفظ الحالي</string>
+    <string name="space_saved">اتحفظ في %1$s</string>
+    <string name="space_empty">افتح شبابيك الأول</string>
+    <string name="routines_title">اختصاراتي الصوتية</string>
+    <string name="routines_help">كل اختصار في سطر: الاسم = أمر؛ أمر؛ أمر. قول الاسم علشان يشتغل.</string>
+    <string name="routines_save">احفظ الاختصارات</string>
+    <string name="routine_line">سطر %1$d:</string>
+    <string name="routine_format">اكتبه كده: الاسم = أمر؛ أمر</string>
+    <string name="routine_taken">الاسم ده مستخدم:</string>
+    <string name="routine_unknown">أمر مش معروف:</string>
+    <string name="routine_too_many">كتير أوي:</string>
+    <string name="routines_example">روتين الصبح = افتح المتصفح؛ افتح المهام؛ رتب النوافذ</string>
+    <string name="event_icons">زرار التقويم بينسخ الموعد لتقويم الموبايل.</string>
 </resources>

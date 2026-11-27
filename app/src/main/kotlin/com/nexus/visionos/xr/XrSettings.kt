@@ -24,7 +24,13 @@ class XrSettings(context: Context) {
         operator fun setValue(owner: Any?, p: KProperty<*>, v: String) = prefs.edit().putString(p.name, v).apply()
     }
     /** Returns every setting to its starting value. Files, notes and sign-ins are not touched. */
-    fun reset() = prefs.edit().clear().apply()
+    fun reset() {
+        // The user's own shortcuts and saved workspaces are their content, not settings.
+        val keep = listOf("routines", "workWindows", "studyWindows", "cinemaWindows").associateWith { prefs.getString(it, null) }
+        val edit = prefs.edit().clear()
+        keep.forEach { (name, value) -> if (value != null) edit.putString(name, value) }
+        edit.apply()
+    }
     private inner class Decimal(private val default: Float, private val low: Float, private val high: Float) {
         operator fun getValue(owner: Any?, p: KProperty<*>) = prefs.getFloat(p.name, default).coerceIn(low, high)
         operator fun setValue(owner: Any?, p: KProperty<*>, v: Float) = prefs.edit().putFloat(p.name, v.coerceIn(low, high)).apply()
@@ -33,8 +39,14 @@ class XrSettings(context: Context) {
     var passthrough by Bool(true)
     /** 0 flat tint, 1 frosted, 2 frosted with colour fringes. */
     var quality by Number(1, 0..2)
-    /** Virtual scene: dusk, night sky, mountains, ocean. */
-    var scene by Number(0, 0..3)
+    /** Virtual place; see [Places]. */
+    var scene by Number(0, 0..7)
+    var spatialSound by Bool(true)
+    /** The user's voice shortcuts, one per line; empty until they save their own. */
+    var routines by Text("")
+    var workWindows by Text("")
+    var studyWindows by Text("")
+    var cinemaWindows by Text("")
     var dim by Decimal(0f, 0f, 0.85f)
     var showHands by Bool(true)
     var occlusion by Bool(false)

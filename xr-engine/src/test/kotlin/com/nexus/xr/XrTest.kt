@@ -514,4 +514,83 @@ class XrTest {
         val phrases = Act.entries.flatMap { act -> act.phrases.map(VoiceCommands::normalize) }
         assertEquals(phrases.size, phrases.toSet().size)
     }
+
+    private fun command(text: String) = VoiceCommands().parse(text)
+
+    @Test fun routinesAcceptOnlyBuiltInStepsAndNeverReplaceACommand() {
+        val book = RoutineBook.parse("""
+            morning = open browser; open tasks; arrange
+            صباح الخير = افتح المتصفح؛ رتب
+            close all = open notes
+            confirm = open notes
+            bad = open notes; format the phone
+            no steps =
+            Morning = open clock
+        """.trimIndent())
+        assertEquals(listOf("morning", "صباح الخير"), book.routines.map { it.name })
+        assertEquals(3, book.find("Morning!")!!.steps.size)
+        assertNull(book.find("good evening"))
+        assertEquals(
+            listOf(RoutineBook.Kind.NAME_TAKEN, RoutineBook.Kind.NAME_TAKEN, RoutineBook.Kind.UNKNOWN_STEP, RoutineBook.Kind.FORMAT, RoutineBook.Kind.NAME_TAKEN),
+            book.problems.map { it.kind }
+        )
+    }
+
+    @Test fun remindersAreUnderstoodInBothLanguages() {
+        assertEquals(VoiceCommand.Remind(10, "call Mom"), command("remind me in 10 minutes to call Mom"))
+        assertEquals(VoiceCommand.Remind(120, "water the plants"), command("remind me to water the plants in two hours".replace("two", "2")))
+        assertEquals(VoiceCommand.Remind(15, "اكلم احمد"), command("فكرني بعد 15 دقيقة اكلم احمد"))
+        assertEquals(VoiceCommand.Remind(60, "أذاكر"), command("ذكرني بعد ساعة أذاكر"))
+        assertNull(command("remind me to sleep"))
+        assertNull(command("remind me in 10 minutes"))
+        assertNull(command("remind me in 999999 hours to rest"))
+        assertEquals(VoiceCommand.Workspace(Space.STUDY, false), command("study mode"))
+        assertTrue(AiControl.needsConfirmation(command("save work space")!!))
+    }
+
+    @Test fun eventsSurviveStorageAndRingOnce() {
+        val events = listOf(CalendarEvent(1, 5_000, "a\tb"), CalendarEvent(2, 9_000, "later"), CalendarEvent(3, 1_000, "done", true))
+        val loaded = EventCodec.decode(EventCodec.encode(events))
+        assertEquals("a b", loaded[0].title)
+        assertEquals(listOf(1L), EventCodec.due(loaded, 6_000).map { it.id })
+        val many = (1..EventCodec.MAX_EVENTS).map { CalendarEvent(it.toLong(), it.toLong(), "x", it == 7) }
+        val full = EventCodec.add(many, CalendarEvent(999, 5, "new"))
+        assertEquals(EventCodec.MAX_EVENTS, full.size)
+        assertTrue(full.none { it.id == 7L })
+    }
+
+    @Test fun subtitlesReadSrtAndVttAndFollowTheTime() {
+        val srt = Subtitles.parse("\uFEFF1\r\n00:00:01,000 --> 00:00:02,500\r\n<i>Hello</i>\r\nthere\r\n\r\n2\r\n00:01:00,000 --> 00:01:01,000\r\nمرحبا\r\n")
+        assertEquals("Hello\nthere", srt.textAt(1_000))
+        assertEquals("", srt.textAt(2_500))
+        assertEquals("مرحبا", srt.textAt(60_500))
+        assertEquals("", srt.textAt(0))
+        val vtt = Subtitles.parse("WEBVTT\n\n00:03.5 --> 00:04.000 align:start\nShort form")
+        assertEquals("Short form", vtt.textAt(3_600))
+        assertTrue(Subtitles.parse("not subtitles").cues.isEmpty())
+    }
+
+    @Test fun soundFromTheRightIsLouderAndEarlierInTheRightEar() {
+        val right = SpatialAudio.mix(1.5708f, 44_100)
+        assertTrue(right.rightGain > right.leftGain)
+        assertEquals(0, right.rightDelay)
+        assertTrue(right.leftDelay in 20..35)
+        val ahead = SpatialAudio.mix(0f, 44_100)
+        assertEquals(ahead.leftGain, ahead.rightGain, 0f)
+        assertEquals(0, ahead.leftDelay + ahead.rightDelay)
+        val stereo = SpatialAudio.render(shortArrayOf(1000), right)
+        assertEquals((right.leftDelay + 1) * 2, stereo.size)
+        assertEquals(1000.toShort(), stereo[1])
+    }
+
+    @Test fun theStartingShortcutExamplesWorkInBothLanguages() {
+        for (language in listOf("values", "values-ar")) {
+            val strings = java.io.File("app/src/main/res/$language/strings.xml").takeIf { it.exists() }
+                ?: java.io.File("../app/src/main/res/$language/strings.xml")
+            val example = Regex("<string name=\"routines_example\">(.*?)</string>").find(strings.readText())!!.groupValues[1]
+            val book = RoutineBook.parse(example)
+            assertEquals(language, 0, book.problems.size)
+            assertEquals(language, 3, book.routines.single().steps.size)
+        }
+    }
 }

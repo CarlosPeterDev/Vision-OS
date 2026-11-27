@@ -5,6 +5,9 @@ import android.content.Context
 import android.net.Uri
 import com.nexus.visionos.R
 import com.nexus.xr.AppType
+import com.nexus.xr.Routine
+import com.nexus.xr.Space
+import com.nexus.xr.Subtitles
 
 /** Counts of real interactions, which the tutorial watches. */
 class Stats {
@@ -29,6 +32,21 @@ interface Shell {
     fun textBeforeCursor(): String
     fun replaceBeforeCursor(count: Int, text: String)
     fun pickVideo()
+    fun videoCount(): Int
+    fun videoIndex(): Int
+    /** Moves along the playlist; does nothing at either end. */
+    fun stepVideo(delta: Int)
+    fun pickSubtitles()
+    fun subtitles(): Subtitles?
+    fun subtitleVersion(): Int
+    /** Lets the user choose their own 360° picture as a place. */
+    fun pickPhotoPlace()
+    fun addEvent(atMillis: Long, title: String)
+    /** Opens the phone's calendar app with the event filled in, for the user to save there. */
+    fun addToPhoneCalendar(atMillis: Long, title: String)
+    fun openSpace(space: Space)
+    fun saveSpace(space: Space)
+    fun runRoutine(routine: Routine)
     fun videoUri(): Uri?
     /** Shows a video or audio file in the player window. */
     fun play(uri: Uri)
@@ -93,6 +111,7 @@ val APP_INFO: Map<AppType, AppInfo> = listOf(
     AppInfo(AppType.PHOTOS, R.string.app_photos, R.drawable.ic_ui_photos, colours(0xFFFFB45A, 0xFFE0457B)),
     AppInfo(AppType.FILES, R.string.app_files, R.drawable.ic_ui_files, colours(0xFF6FB6FF, 0xFF2C55C9)),
     AppInfo(AppType.CAMERA, R.string.app_camera, R.drawable.ic_ui_camera, colours(0xFF9AA3AE, 0xFF2F353E)),
+    AppInfo(AppType.SPACES, R.string.app_spaces, R.drawable.ic_ui_spaces, colours(0xFFB08CFF, 0xFF5A3FC0)),
     AppInfo(AppType.FIT, R.string.app_fit, R.drawable.ic_ui_fit, colours(0xFF7EE08A, 0xFF1F8A4C)),
     AppInfo(AppType.TASKS, R.string.app_tasks, R.drawable.ic_ui_tasks, colours(0xFF7FB2FF, 0xFF3B4FD0)),
     AppInfo(AppType.CALENDAR, R.string.app_calendar, R.drawable.ic_ui_calendar, colours(0xFFFF8A80, 0xFFC62828)),

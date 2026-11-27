@@ -61,6 +61,8 @@ class Scene(
     /** Hands used for occlusion, present even when outlines are hidden. */
     val handShapes: List<List<Point>> = emptyList(),
     val fit: HeadsetFit = HeadsetFit(),
+    /** Progress of the opening animation; 1 when it is over. */
+    val intro: Float = 1f,
     /** Messages drawn inside the 3D picture, so that in headset mode both eyes see them. */
     val messages: List<SceneMessage> = emptyList(),
     val lensZoom: Float = 1f,
@@ -136,6 +138,31 @@ class XrRenderer(
     private var width = 1
     private var height = 1
     private val icons = HashMap<Int, Int>()
+    private var photoTexture = 0
+    /** Kept so the picture can be uploaded again if Android drops the graphics context. */
+    private var photo: Bitmap? = null
+
+    fun setPhoto(bitmap: Bitmap?) = view.queueEvent {
+        photo = bitmap
+        if (ready) uploadPhoto()
+    }
+
+    private fun uploadPhoto() {
+        if (photoTexture != 0) glDeleteTextures(1, intArrayOf(photoTexture), 0)
+        photoTexture = 0
+        val bitmap = photo ?: return
+        val ids = IntArray(1)
+        glGenTextures(1, ids, 0)
+        glActiveTexture(GL_TEXTURE1)
+        glBindTexture(GL_TEXTURE_2D, ids[0])
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+        GLUtils.texImage2D(GL_TEXTURE_2D, 0, bitmap, 0)
+        glActiveTexture(GL_TEXTURE0)
+        photoTexture = ids[0]
+    }
     private class Label(val texture: Int, val width: Int, val height: Int)
     private val labels = HashMap<SceneMessage, Label>()
     private var blurA: Target? = null
@@ -198,6 +225,8 @@ class XrRenderer(
         titles.clear()
         icons.clear()
         labels.clear()
+        photoTexture = 0
+        uploadPhoto()
         blurA = null; blurB = null; eye = null
         camera = null
         cameraRequest?.invalidate()
@@ -351,7 +380,10 @@ class XrRenderer(
             val t = tan(Math.toRadians(viewFov(s, aspect) / 2.0)).toFloat()
             skyProgram.set("uTan", t * aspect, t)
             skyProgram.set("uHead", q.x, q.y, q.z, q.w)
-            skyProgram.set("uScene", s.environment)
+            // Without a picture the 360° place shows the first one instead.
+            val place = if (s.environment == Places.PHOTO && photoTexture == 0) 0 else s.environment
+            skyProgram.set("uScene", place)
+            if (place == Places.PHOTO) skyProgram.texture("uPhoto", photoTexture, GL_TEXTURE_2D, 1)
             fullScreen(skyProgram)
         }
         if (s.dim > 0.01f) {
@@ -428,6 +460,7 @@ class XrRenderer(
         glEnable(GL_BLEND)
         drawHands(s)
 
+        if (s.intro < 1f) drawIntro(s)
         drawMessages(s, q, aspect)
 
         for (cursor in s.cursors) {
@@ -442,6 +475,16 @@ class XrRenderer(
             putQuad(p - right * size - up * size, p + right * size - up * size, p - right * size + up * size, p + right * size + up * size)
             submitQuad(ringProgram)
         }
+    }
+
+    /** The view fades up from black when spatial mode opens. */
+    private fun drawIntro(s: Scene) {
+        val left = (1f - s.intro).coerceIn(0f, 1f)
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
+        flatProgram.use()
+        flatProgram.set("uColor", 0f, 0f, 0f, left * left)
+        fullScreen(flatProgram)
     }
 
     /** Head-locked panels a little over a metre away, drawn once for each eye. */

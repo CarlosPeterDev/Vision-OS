@@ -95,48 +95,117 @@ internal fun tasksApp(context: Context, shell: Shell): SpatialApp {
     return SpatialApp(view, stop)
 }
 
-internal fun calendarApp(context: Context): SpatialApp {
+/** A month at a time; touching a day lists its events and adds new ones with a reminder. */
+internal fun calendarApp(context: Context, shell: Shell): SpatialApp {
     var month = YearMonth.now()
+    var open: LocalDate? = null
     val locale = context.resources.configuration.locales[0]
-    lateinit var title: TextView
-    lateinit var grid: LinearLayout
-    fun cell(line: LinearLayout, value: String, strong: Boolean = false, faded: Boolean = false) {
-        line.addView(TextView(context).apply {
-            text = value
-            textSize = 13f
-            setTextColor(-1)
-            alpha = if (faded) 0.6f else 1f
-            gravity = Gravity.CENTER
-            if (strong) background = LiquidGlass(0x5AB0FF, 0x90, 0xFF)
-        }, LinearLayout.LayoutParams(0, -1, 1f).apply { setMargins(2, 2, 2, 2) })
-    }
-    fun draw() {
-        title.text = month.month.getDisplayName(TextStyle.FULL_STANDALONE, locale) + " " + month.year
-        grid.removeAllViews()
-        val firstDay = WeekFields.of(locale).firstDayOfWeek
-        grid.row(0.7f) { for (i in 0..6) cell(this, firstDay.plus(i.toLong()).getDisplayName(TextStyle.SHORT, locale), faded = true) }
-        val lead = (month.atDay(1).dayOfWeek.value - firstDay.value + 7) % 7
-        val today = LocalDate.now()
-        for (week in 0..5) grid.row(1f) {
-            for (i in 0..6) {
-                val day = week * 7 + i - lead + 1
-                if (day in 1..month.lengthOfMonth()) cell(this, day.toString(), strong = month.atDay(day) == today) else cell(this, "")
-            }
-        }
-    }
-    val view = context.vertical {
-        row(height = context.px(48)) {
+    var hour = java.time.LocalTime.now().plusHours(1).hour
+    var minute = 0
+    val name = editor(context).apply { isSingleLine = true; hint = context.getString(R.string.event_hint) }
+    lateinit var body: LinearLayout
+    var draw: () -> Unit = {}
+    fun zone() = java.time.ZoneId.systemDefault()
+    fun dayOf(millis: Long) = java.time.Instant.ofEpochMilli(millis).atZone(zone()).toLocalDate()
+
+    fun monthView() {
+        body.row(height = context.px(48)) {
             iconKey(R.drawable.ic_ui_back) { month = month.minusMonths(1); draw() }
-            title = TextView(context).apply { setTextColor(-1); textSize = 17f; gravity = Gravity.CENTER }
+            val title = TextView(context).apply { setTextColor(-1); textSize = 17f; gravity = Gravity.CENTER }
+            title.text = month.month.getDisplayName(TextStyle.FULL_STANDALONE, locale) + " " + month.year
             title.setOnClickListener { month = YearMonth.now(); draw() }
             addView(title, LinearLayout.LayoutParams(0, -1, 4f))
             iconKey(R.drawable.ic_ui_forward) { month = month.plusMonths(1); draw() }
         }
-        grid = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        addView(grid, LinearLayout.LayoutParams(-1, 0, 1f))
+        val grid = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(grid, LinearLayout.LayoutParams(-1, 0, 1f))
+        fun cell(line: LinearLayout, value: String, strong: Boolean = false, faded: Boolean = false, click: (() -> Unit)? = null) {
+            line.addView(TextView(context).apply {
+                text = value
+                textSize = 13f
+                setTextColor(-1)
+                alpha = if (faded) 0.6f else 1f
+                gravity = Gravity.CENTER
+                if (strong) background = LiquidGlass(0x5AB0FF, 0x90, 0xFF)
+                if (click != null) setOnClickListener { click() }
+            }, LinearLayout.LayoutParams(0, -1, 1f).apply { setMargins(2, 2, 2, 2) })
+        }
+        val firstDay = WeekFields.of(locale).firstDayOfWeek
+        grid.row(0.7f) { for (i in 0..6) cell(this, firstDay.plus(i.toLong()).getDisplayName(TextStyle.SHORT, locale), faded = true) }
+        val lead = (month.atDay(1).dayOfWeek.value - firstDay.value + 7) % 7
+        val today = LocalDate.now()
+        val busy = EventStore.all(context).map { dayOf(it.atMillis) }.toSet()
+        for (week in 0..5) grid.row(1f) {
+            for (i in 0..6) {
+                val day = week * 7 + i - lead + 1
+                if (day in 1..month.lengthOfMonth()) {
+                    val date = month.atDay(day)
+                    cell(this, if (date in busy) "$day •" else "$day", strong = date == today) { open = date; draw() }
+                } else cell(this, "")
+            }
+        }
     }
-    draw()
-    return SpatialApp(view)
+
+    fun dayView(date: LocalDate) {
+        body.row(height = context.px(48)) {
+            iconKey(R.drawable.ic_ui_back) { open = null; draw() }
+            val title = TextView(context).apply { setTextColor(-1); textSize = 16f; gravity = Gravity.CENTER }
+            title.text = date.format(java.time.format.DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.FULL).withLocale(locale))
+            addView(title, LinearLayout.LayoutParams(0, -1, 5f))
+        }
+        val list = context.scrolling {
+            row(height = context.px(50)) {
+                (name.parent as? android.view.ViewGroup)?.removeView(name)
+                addView(name, LinearLayout.LayoutParams(0, -1, 4f))
+                iconKey(R.drawable.ic_ui_keyboard) { name.requestFocus(); shell.open(AppType.KEYBOARD) }
+            }
+            row(height = context.px(48)) {
+                layoutDirection = View.LAYOUT_DIRECTION_LTR
+                key("−") { hour = (hour + 23) % 24; draw() }
+                val clock = text("%02d:%02d".format(hour, minute), 18f)
+                removeView(clock)
+                key("+") { hour = (hour + 1) % 24; draw() }
+                addView(clock, LinearLayout.LayoutParams(0, -1, 1.4f))
+                clock.gravity = Gravity.CENTER
+                key("−5") { minute = (minute + 55) % 60; draw() }
+                key("+5") { minute = (minute + 5) % 60; draw() }
+            }
+            row(height = context.px(48)) {
+                key(context.getString(R.string.event_add)) {
+                    if (name.text.isNotBlank()) {
+                        shell.addEvent(date.atTime(hour, minute).atZone(zone()).toInstant().toEpochMilli(), name.text.toString())
+                        name.text.clear()
+                        draw()
+                    }
+                }
+            }
+            val events = EventStore.all(context).filter { dayOf(it.atMillis) == date }
+            for (event in events) {
+                row(height = context.px(48)) {
+                    val time = java.time.Instant.ofEpochMilli(event.atMillis).atZone(zone()).toLocalTime()
+                    val label = text("%02d:%02d  %s".format(time.hour, time.minute, event.title), 14f)
+                    removeView(label)
+                    addView(label, LinearLayout.LayoutParams(0, -1, 4f))
+                    label.gravity = Gravity.CENTER_VERTICAL
+                    iconKey(R.drawable.ic_ui_calendar) {
+                        shell.addToPhoneCalendar(event.atMillis, event.title)
+                    }.contentDescription = context.getString(R.string.event_to_phone)
+                    iconKey(R.drawable.ic_ui_close) { EventStore.remove(context, event.id); draw() }
+                }
+            }
+            text(context.getString(R.string.event_note) + " " + context.getString(R.string.event_icons), 12f).alpha = 0.75f
+        }
+        body.addView(list, LinearLayout.LayoutParams(-1, 0, 1f))
+    }
+
+    val view = context.vertical { body = this }
+    draw = {
+        body.removeAllViews()
+        open?.let { dayView(it) } ?: monthView()
+    }
+    var version = -1
+    val stop = ticker(1000) { if (version != EventStore.version) { version = EventStore.version; draw() } }
+    return SpatialApp(view, stop)
 }
 
 private class Stroke(val path: Path, val colour: Int, val width: Float)

@@ -113,7 +113,13 @@ sealed interface VoiceCommand {
     data class ClickLabel(val label: String) : VoiceCommand
     data class Timer(val minutes: Int) : VoiceCommand
     data class AddTask(val text: String) : VoiceCommand
+    /** Shows [text] again after [minutes], even if spatial mode is closed by then. */
+    data class Remind(val minutes: Int, val text: String) : VoiceCommand
+    /** Switches to a saved set of windows, or saves the current ones into it. */
+    data class Workspace(val space: Space, val save: Boolean) : VoiceCommand
 }
+
+enum class Space { WORK, STUDY, CINEMA }
 
 sealed interface CommandResult {
     data class Run(val command: VoiceCommand) : CommandResult
@@ -142,6 +148,9 @@ class VoiceCommands(private val confirmWindowMs: Long = 20_000) {
         if (command is VoiceCommand.CloseAll || command is VoiceCommand.Exit) return askFirst(command, nowMs)
         return CommandResult.Run(command)
     }
+
+    /** Drops a command that was waiting to be confirmed. */
+    fun forget() { pending = null }
 
     /** Holds [command] until the user says "confirm". */
     fun askFirst(command: VoiceCommand, nowMs: Long): CommandResult.AskToConfirm {
@@ -184,6 +193,7 @@ class VoiceCommands(private val confirmWindowMs: Long = 20_000) {
         val clean = spoken.drop(start).map { normalize(it) }
         fun rest(prefix: List<String>) = spoken.drop(start + prefix.size).joinToString(" ").trim().trimEnd('.', '،')
         timer(clean)?.let { return it }
+        reminder(clean, spoken.drop(start))?.let { return it }
         for ((prefix, build) in PREFIXES) {
             if (clean.size > prefix.size && clean.subList(0, prefix.size) == prefix) {
                 val value = rest(prefix)
@@ -193,15 +203,49 @@ class VoiceCommands(private val confirmWindowMs: Long = 20_000) {
         return null
     }
 
+    /** "remind me in 10 minutes to call home" and the same with the time at the end. */
+    private fun reminder(words: List<String>, spoken: List<String>): VoiceCommand? {
+        val lead = REMIND_LEADS.firstOrNull { words.size > it.size && words.subList(0, it.size) == it }?.size ?: return null
+        /** A duration starting at [at]: its minutes and how many words it took. */
+        fun duration(at: Int): Pair<Int, Int>? {
+            if (words.getOrNull(at) !in AFTER) return null
+            val first = words.getOrNull(at + 1) ?: return null
+            ONE_UNIT[first]?.let { return it to 2 }
+            val count = number(first) ?: return null
+            val unit = UNITS[words.getOrNull(at + 2)] ?: return null
+            return count * unit to 3
+        }
+        fun result(minutes: Int, from: Int, to: Int): VoiceCommand? {
+            var begin = from
+            if (begin < to && words[begin] in LINKS) begin++
+            val text = spoken.subList(begin, to).joinToString(" ").trim().trimEnd('.', '،')
+            return if (minutes in 1..MAX_REMIND_MINUTES && text.isNotEmpty()) VoiceCommand.Remind(minutes, text) else null
+        }
+        duration(lead)?.let { (minutes, used) -> return result(minutes, lead + used, words.size) }
+        for (at in words.size - 2 downTo lead + 1) {
+            val (minutes, used) = duration(at) ?: continue
+            if (at + used == words.size) return result(minutes, lead, at)
+        }
+        return null
+    }
+
+    private fun number(word: String): Int? =
+        NUMBERS[word] ?: word.map { if (it in '٠'..'٩') '0' + (it - '٠') else it }.joinToString("").toIntOrNull()
+
     private fun timer(words: List<String>): VoiceCommand? {
         val joined = words.joinToString(" ")
         val match = TIMER.firstNotNullOfOrNull { it.matchEntire(joined) } ?: return null
         val raw = match.groupValues[1]
-        val minutes = NUMBERS[raw] ?: raw.map { if (it in '٠'..'٩') '0' + (it - '٠') else it }.joinToString("").toIntOrNull()
+        val minutes = number(raw)
         return minutes?.takeIf { it in 1..600 }?.let { VoiceCommand.Timer(it) }
     }
 
     companion object {
+        /** A reply to a question the shell asked. */
+        fun isAnswer(text: String) = normalize(text).let { it in CONFIRM || it in CANCEL }
+
+        const val MAX_REMIND_MINUTES = 7 * 24 * 60
+
         /** Lower case, no punctuation, and Arabic spelling variants folded together. */
         fun normalize(text: String): String = text.lowercase()
             .replace(Regex("[\\u064B-\\u0652\\u0640]"), "")
@@ -223,6 +267,16 @@ class VoiceCommands(private val confirmWindowMs: Long = 20_000) {
             for (act in Act.entries) for (phrase in act.phrases) put(normalize(phrase), act)
         }
 
+        private val REMIND_LEADS = listOf("remind me", "فكرني", "ذكرني").map { normalize(it).split(' ') }
+        private val AFTER = set("in", "after", "بعد", "كمان")
+        private val LINKS = set("to", "that", "about", "ان", "اني", "انا")
+        private val UNITS = buildMap {
+            for (word in set("minute", "minutes", "دقيقه", "دقايق", "دقائق")) put(word, 1)
+            for (word in set("hour", "hours", "ساعه", "ساعات")) put(word, 60)
+        }
+        /** Durations said as a single word after "after". */
+        private val ONE_UNIT = mapOf(normalize("ساعة") to 60, normalize("ساعتين") to 120, normalize("دقيقة") to 1, normalize("دقيقتين") to 2)
+
         private val FIXED: Map<String, VoiceCommand> = buildMap {
             fun add(command: VoiceCommand, vararg phrases: String) = phrases.forEach { put(normalize(it), command) }
             add(VoiceCommand.CloseAll, "close all", "close all windows", "close everything", "اقفل كل حاجه", "اقفل الكل", "اغلق الكل", "اقفل كل النوافذ")
@@ -232,6 +286,12 @@ class VoiceCommands(private val confirmWindowMs: Long = 20_000) {
             add(VoiceCommand.Cinema, "cinema", "cinema mode", "وضع السينما", "سينما")
             add(VoiceCommand.Photo, "take photo", "take a photo", "screenshot", "take screenshot", "صور", "خد صوره", "صور الشاشه")
             add(VoiceCommand.Open(AppType.HOME), "go home", "home", "الرئيسيه")
+            add(VoiceCommand.Workspace(Space.WORK, false), "work space", "work mode", "مساحه الشغل", "وضع الشغل")
+            add(VoiceCommand.Workspace(Space.STUDY, false), "study space", "study mode", "مساحه المذاكره", "وضع المذاكره")
+            add(VoiceCommand.Workspace(Space.CINEMA, false), "cinema space", "movie mode", "مساحه الافلام", "وضع الافلام")
+            add(VoiceCommand.Workspace(Space.WORK, true), "save work space", "احفظ مساحه الشغل")
+            add(VoiceCommand.Workspace(Space.STUDY, true), "save study space", "احفظ مساحه المذاكره")
+            add(VoiceCommand.Workspace(Space.CINEMA, true), "save cinema space", "احفظ مساحه الافلام")
         }
 
         private val PREFIXES: List<Pair<List<String>, (String) -> VoiceCommand>> = buildList<Pair<List<String>, (String) -> VoiceCommand>> {
@@ -268,6 +328,7 @@ class VoiceCommands(private val confirmWindowMs: Long = 20_000) {
             AppType.PHOTOS to set("photos", "gallery", "الصور", "المعرض"),
             AppType.FILES to set("files", "my files", "الملفات", "ملفات", "ملفاتي"),
             AppType.CAMERA to set("camera", "capture", "الكاميرا", "التصوير"),
+            AppType.SPACES to set("shortcuts", "my shortcuts", "spaces", "اختصاراتي", "المساحات"),
             AppType.FIT to set("screen fit", "headset fit", "fit screens", "lens settings", "ضبط الشاشتين", "ضبط النضاره"),
             AppType.TASKS to set("tasks", "to do", "todo list", "to do list", "المهام", "مهامي"),
             AppType.CALENDAR to set("calendar", "التقويم", "النتيجه"),

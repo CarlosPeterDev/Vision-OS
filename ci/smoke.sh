@@ -69,7 +69,7 @@ if [ "$(adb logcat -d -s NexusXR | grep -c 'Command Do done')" -ge 3 ]; then ech
 if adb logcat -d -s NexusXR | grep -q "Resizing nexus-.* failed"; then echo "FAIL: reshaping failed"; fail=1; fi
 adb logcat -d > smoke/logcat-voice.txt
 # Screens of other windows, for review.
-for apps in CENTER SETTINGS BROWSER PHOTOS FILES FIT KEYBOARD TASKS CALENDAR PAINT CONVERTER GAMES WEATHER VOICE; do
+for apps in CENTER SETTINGS BROWSER PHOTOS FILES FIT SPACES MEDIA KEYBOARD TASKS CALENDAR PAINT CONVERTER GAMES WEATHER VOICE; do
   adb shell am force-stop $PKG
   adb shell am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --es open $apps
   sleep 22
@@ -107,6 +107,28 @@ if wait_for "Finger fit on" 20; then
   adb shell "input tap $((W / 4)) $((H / 2)) & sleep 0.25; input tap $((W / 4)) $((H / 2)); wait"
   wait_for "Finger fit saved" 20
 fi
+# A saved shortcut, a workspace, a spoken reminder that comes due, and two of the new places.
+adb shell am force-stop $PKG
+adb shell pm clear $PKG > /dev/null
+adb shell pm grant $PKG android.permission.CAMERA
+adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS 2>/dev/null
+adb logcat -c
+adb shell "am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --es say 'morning routine|study mode|remind me in 1 minutes to stretch|next scene|next scene|next scene|next scene|next scene'"
+if wait_for "Shortcut\|Command Do done" 60; then :; fi
+if wait_for "Command Remind done" 90; then
+  if wait_for "Reminder shown" 120; then
+    sleep 1
+    adb exec-out screencap -p > smoke/reminder.png
+  fi
+fi
+adb logcat -d > smoke/logcat-batch2.txt
+# One place further on; the choice was saved.
+adb shell am force-stop $PKG
+adb logcat -c
+adb shell "am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --es say 'next scene'"
+if wait_for "Command Do done" 60; then sleep 6; fi
+adb exec-out screencap -p > smoke/new-place.png
+adb logcat -d >> smoke/logcat-batch2.txt
 # The recording badge must reach both eyes too.
 adb shell am force-stop $PKG
 adb logcat -c
@@ -119,7 +141,7 @@ adb shell am force-stop $PKG
 adb shell am start -W -n $PKG/.MainActivity; sleep 8
 adb exec-out screencap -p > smoke/start-screen.png
 adb logcat -d > smoke/logcat-last.txt
-cat smoke/logcat-capture.txt smoke/logcat-voice.txt smoke/logcat-headset.txt smoke/logcat-last.txt > smoke/logcat.txt
+cat smoke/logcat-capture.txt smoke/logcat-voice.txt smoke/logcat-headset.txt smoke/logcat-batch2.txt smoke/logcat-last.txt > smoke/logcat.txt
 grep -E "NexusXR|FATAL EXCEPTION" smoke/logcat.txt > smoke/summary.txt
 grep -q "FATAL EXCEPTION" smoke/logcat.txt && { echo "FAIL: crash detected"; fail=1; }
 if grep -q "Immersive view halted" smoke/logcat.txt; then echo "NOTE: the camera safety stop appeared during this run"; fi

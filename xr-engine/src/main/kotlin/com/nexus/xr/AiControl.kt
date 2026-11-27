@@ -19,10 +19,11 @@ object AiControl {
         appendLine("At most $MAX_STEPS DO lines, in order. Use SAY alone for questions or when no command fits.")
         appendLine("Never claim to have done something that no DO line does.")
         appendLine("Commands with text: type <text> | search for <query> | go to <website> | click <button label> |")
-        appendLine("set timer for <n> minutes | add task <text>")
+        appendLine("set timer for <n> minutes | add task <text> | remind me in <n> minutes to <text> |")
+        appendLine("remind me in <n> hours to <text>")
         append("Open or close an app: open <app> | close <app>. Apps: ")
         appendLine(VoiceCommands.NAMES.values.joinToString(", ") { it.first() })
-        append("Other commands: close all, exit, recenter, arrange, cinema, take photo, ")
+        append("Other commands: close all, exit, recenter, arrange, cinema, take photo, work space, study space, cinema space, ")
         appendLine(Act.entries.joinToString(", ") { it.phrases.first() })
         append("The window in use is: ${focused?.name?.lowercase() ?: "none"}.")
     }
@@ -58,6 +59,7 @@ object AiControl {
     fun needsConfirmation(command: VoiceCommand): Boolean = when (command) {
         VoiceCommand.CloseAll, VoiceCommand.Exit -> true
         is VoiceCommand.Do -> command.act in setOf(Act.CLICK, Act.LONG_CLICK, Act.ENTER, Act.CLEAR_TEXT, Act.CUT, Act.PASTE, Act.CLOSE_TAB)
+        is VoiceCommand.Workspace -> command.save
         is VoiceCommand.ClickLabel -> VoiceCommands.normalize(command.label).let { label -> RISKY.any { it in label } }
         else -> false
     }

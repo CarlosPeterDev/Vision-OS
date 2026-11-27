@@ -3,7 +3,6 @@ package com.nexus.visionos.xr
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
-import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -19,7 +18,6 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
 import com.nexus.visionos.R
-import com.nexus.xr.Act
 import com.nexus.xr.AppType
 import com.nexus.xr.Calculator
 import com.nexus.xr.WordSuggester
@@ -31,7 +29,7 @@ fun buildApp(context: Context, type: AppType, shell: Shell): SpatialApp = when (
     AppType.NOTES -> notes(context, shell)
     AppType.CALCULATOR -> calculator(context)
     AppType.CLOCK -> clock(context, shell)
-    AppType.MEDIA -> media(context, shell)
+    AppType.MEDIA -> playerApp(context, shell)
     AppType.SETTINGS -> settingsApp(context, shell)
     AppType.ASSISTANT -> shell.assistant(context)
     AppType.KEYBOARD -> keyboard(context, shell)
@@ -41,8 +39,9 @@ fun buildApp(context: Context, type: AppType, shell: Shell): SpatialApp = when (
     AppType.FILES -> files(context, shell)
     AppType.CAMERA -> captureApp(context, shell)
     AppType.FIT -> headsetFitApp(context, shell)
+    AppType.SPACES -> spacesApp(context, shell)
     AppType.TASKS -> tasksApp(context, shell)
-    AppType.CALENDAR -> calendarApp(context)
+    AppType.CALENDAR -> calendarApp(context, shell)
     AppType.PAINT -> paintApp(context)
     AppType.CONVERTER -> converterApp(context, shell)
     AppType.GAMES -> gamesApp(context)
@@ -162,44 +161,6 @@ private fun clock(context: Context, shell: Shell): SpatialApp {
     return SpatialApp(view, stop)
 }
 
-private fun media(context: Context, shell: Shell): SpatialApp {
-    val video = VideoView(context)
-    lateinit var status: TextView
-    var current: Uri? = null
-    val view = context.vertical {
-        status = text(context.getString(R.string.media_hint))
-        addView(FrameLayout(context).apply { addView(video, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER)) }, LinearLayout.LayoutParams(-1, 0, 1f))
-        addView(LinearLayout(context).apply {
-            key(context.getString(R.string.choose_video), 2f) { shell.pickVideo() }
-            iconKey(R.drawable.ic_ui_rewind) { video.seekTo((video.currentPosition - 10_000).coerceAtLeast(0)) }
-            iconKey(R.drawable.ic_ui_play) { video.start() }
-            iconKey(R.drawable.ic_ui_pause) { video.pause() }
-            iconKey(R.drawable.ic_ui_skip) { video.seekTo(video.currentPosition + 10_000) }
-            iconKey(R.drawable.ic_ui_media) { shell.toggleCinema() }
-        }, LinearLayout.LayoutParams(-1, context.px(56)))
-    }
-    video.setOnErrorListener { _, _, _ -> status.text = context.getString(R.string.media_error); true }
-    val stop = ticker(500) {
-        val chosen = shell.videoUri()
-        if (chosen != null && chosen != current) {
-            current = chosen
-            video.setVideoURI(chosen)
-            video.start()
-            status.text = ""
-        }
-    }
-    return SpatialApp(view) { stop(); video.stopPlayback() }.also {
-        it.command = { act ->
-            when (act) {
-                Act.PLAY -> video.start()
-                Act.PAUSE -> video.pause()
-                Act.SKIP -> video.seekTo(video.currentPosition + 10_000)
-                Act.REWIND -> video.seekTo((video.currentPosition - 10_000).coerceAtLeast(0))
-                else -> null
-            } != null
-        }
-    }
-}
 
 private fun keyboard(context: Context, shell: Shell): SpatialApp {
     val layouts = listOf(

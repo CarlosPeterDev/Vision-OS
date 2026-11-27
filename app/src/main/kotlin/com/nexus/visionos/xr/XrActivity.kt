@@ -121,7 +121,36 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     private val microphonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         if (it) talk()
     }
-    private val videoPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { video = it ?: video }
+    private val videoPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) playlist(uris.take(100), 0)
+    }
+    private var videos = emptyList<Uri>()
+    private var subtitles: Subtitles? = null
+    private var subtitleChanges = 0
+    private val subtitlePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) loadSubtitles(uri)
+    }
+    private val photoPlacePicker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        showHud(getString(R.string.working), SystemClock.uptimeMillis() + 60_000)
+        io.execute {
+            val saved = Places.save(applicationContext, uri)
+            val picture = if (saved) Places.load(applicationContext) else null
+            runOnUiThread {
+                if (picture == null) return@runOnUiThread say(getString(R.string.photo_place_failed))
+                renderer.setPhoto(picture)
+                settings.scene = Places.PHOTO
+                settings.passthrough = false
+                settingsChanged()
+                say(getString(R.string.photo_place_ready))
+            }
+        }
+    }
+    private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        if (!it) say(getString(R.string.reminder_no_notifications), 7000)
+    }
+    private var remindersCheckedAt = 0L
+    private var introAt = 0L
     private val photoPicker = registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(60)) {
         if (it.isNotEmpty()) { photos = it; library++ }
     }
@@ -209,6 +238,9 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         gl.preserveEGLContextOnPause = true
         renderer = XrRenderer(gl, head::orientation) { action -> runOnUiThread { if (!isDestroyed) action() } }
         gl.setRenderer(renderer)
+        io.execute {
+            Places.load(applicationContext)?.let { picture -> runOnUiThread { renderer.setPhoto(picture) } }
+        }
         gl.setOnTouchListener { _, event -> touchFallback(event); true }
         warningTexts = List(2) {
             TextView(this).apply {
@@ -271,6 +303,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         super.onResume()
         gl.onResume()
         head.start()
+        EventStore.shownInSpatial = true
         running = true
         resumedAt = SystemClock.uptimeMillis()
         if (settings.passthrough || !cameraRunning) {
@@ -285,6 +318,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     }
 
     override fun onPause() {
+        EventStore.shownInSpatial = false
         // The microphone is never used while spatial mode is off the screen.
         resumeListening = voiceControl?.active == true
         stopListening()
@@ -384,6 +418,10 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         windows.defaultDistance = settings.windowDistance
         controller.freeResize = settings.freeResize
         if (timerEnd != 0L && SystemClock.elapsedRealtime() >= timerEnd) ring()
+        if (halted == null) checkReminders(now)
+        if (introAt == 0L) introAt = now
+        // A slow phone skips the opening animation.
+        val intro = if (level >= PerformanceGovernor.MAX_LEVEL) 1f else ((now - introAt) / INTRO_MS).coerceIn(0f, 1f)
         if (level != loggedLevel) {
             loggedLevel = level
             Log.i("NexusXR", "Performance level $level at ${renderer.fps} FPS")
@@ -472,7 +510,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
 
         val aimed = controller.hovered().filter { it.region != Region.CONTENT && it.region != Region.TITLE }
             .map { it.windowId to it.region }.toSet()
-        if ((aimed - highlighted).isNotEmpty()) feedback.hover()
+        if ((aimed - highlighted).isNotEmpty()) feedback.hover(aimAzimuth())
         highlighted = aimed
 
         // An open hand turned away shows Home; turned towards the face it opens the quick menu.
@@ -509,9 +547,9 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             occlusion = settings.occlusion && level < PerformanceGovernor.MAX_LEVEL,
             environment = settings.scene,
             dim = maxOf(settings.dim, if (cinema) CINEMA_DIM else 0f),
-            fit = settings.fit, lensZoom = settings.lensZoom,
+            fit = settings.fit, lensZoom = settings.lensZoom, intro = intro,
             lensGrid = stereo && (fitDragging || now < lensGridUntil),
-            messages = headsetMessages(),
+            messages = headsetMessages(intro),
             stereo = base.stereo, passthrough = base.passthrough, quality = base.quality, ipd = base.ipd,
             distortion = base.distortion, cameraTurns = base.cameraTurns, displayDegrees = base.displayDegrees,
             cameraFov = base.cameraFov, blank = halted != null
@@ -522,15 +560,16 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
      * Flat Android views cover the screen once, so in headset mode only one eye would see them.
      * They are hidden there and their text is drawn into both eyes instead.
      */
-    private fun headsetMessages(): List<SceneMessage> {
+    private fun headsetMessages(intro: Float): List<SceneMessage> {
         val badges = listOf(
             Triple(hud, 0xF0101520.toInt(), 0.55f),
             Triple(listeningBadge, 0xF05A35B5.toInt(), -0.5f),
             Triple(recordingBadge, 0xF0C01822.toInt(), -0.78f)
         )
         for ((badge, _, _) in badges) badge.alpha = if (stereo) 0f else 1f
-        if (!stereo) return emptyList()
-        return badges.filter { it.first.visibility == View.VISIBLE }
+        val title = if (intro < 0.85f) listOf(SceneMessage("Nexus Vision", 0x00000000, 0.12f)) else emptyList()
+        if (!stereo) return title
+        return title + badges.filter { it.first.visibility == View.VISIBLE }
             .map { (badge, tint, height) -> SceneMessage(badge.text.toString(), tint, height) }
     }
 
@@ -778,9 +817,15 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     override fun onContentHover(windowId: Int, u: Float, v: Float) { surfaces[windowId]?.hover(u, v) }
     override fun onHoverEnd(windowId: Int) { surfaces[windowId]?.hoverEnd() }
 
+    /** Where the aimed-at point is, seen from the head: zero ahead, positive to the right. */
+    private fun aimAzimuth(): Float {
+        val local = head.orientation().conjugate().rotate(aimRay?.direction ?: return 0f)
+        return kotlin.math.atan2(local.x, -local.z)
+    }
+
     override fun onPressed(region: Region) {
         stats.presses++
-        feedback.click()
+        feedback.click(aimAzimuth())
     }
 
     override fun onAdjusted(region: Region) {
@@ -819,10 +864,153 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         videoPicker.launch(arrayOf("video/*", "audio/*"))
     }
 
+    private fun playlist(uris: List<Uri>, index: Int) {
+        videos = uris
+        video = uris[index]
+        subtitles = null
+        subtitleChanges++
+    }
+
+    override fun videoCount() = videos.size
+    override fun videoIndex() = videos.indexOf(video).coerceAtLeast(0)
+
+    override fun stepVideo(delta: Int) {
+        val next = videoIndex() + delta
+        if (next in videos.indices) playlist(videos, next)
+    }
+
+    override fun pickSubtitles() {
+        stereo = false
+        subtitlePicker.launch(arrayOf("*/*"))
+    }
+
+    override fun subtitles() = subtitles
+    override fun subtitleVersion() = subtitleChanges
+
+    private fun loadSubtitles(uri: Uri) {
+        io.execute {
+            val parsed = runCatching {
+                contentResolver.openInputStream(uri)!!.use { stream ->
+                    val buffer = ByteArray(2 * 1024 * 1024)
+                    var size = 0
+                    while (size < buffer.size) {
+                        val read = stream.read(buffer, size, buffer.size - size)
+                        if (read < 0) break
+                        size += read
+                    }
+                    Subtitles.parse(decodeText(buffer.copyOf(size)))
+                }
+            }.getOrNull()?.takeIf { it.cues.isNotEmpty() }
+            runOnUiThread {
+                if (parsed == null) return@runOnUiThread say(getString(R.string.subtitles_failed))
+                subtitles = parsed
+                subtitleChanges++
+                say(getString(R.string.subtitles_loaded, parsed.cues.size))
+            }
+        }
+    }
+
+    /** UTF-8 when the file is valid UTF-8; otherwise the older Arabic Windows encoding. */
+    private fun decodeText(bytes: ByteArray): String = try {
+        Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+    } catch (e: java.nio.charset.CharacterCodingException) {
+        String(bytes, charset("windows-1256"))
+    }
+
+    override fun pickPhotoPlace() {
+        stereo = false
+        photoPlacePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+    }
+
+    override fun addEvent(atMillis: Long, title: String) {
+        EventStore.add(applicationContext, atMillis, title)
+        if (atMillis > System.currentTimeMillis()) askForNotifications()
+    }
+
+    private fun askForNotifications() {
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            stereo = false
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    override fun addToPhoneCalendar(atMillis: Long, title: String) {
+        stereo = false
+        val intent = Intent(Intent.ACTION_INSERT, android.provider.CalendarContract.Events.CONTENT_URI)
+            .putExtra(android.provider.CalendarContract.EXTRA_EVENT_BEGIN_TIME, atMillis)
+            .putExtra(android.provider.CalendarContract.Events.TITLE, title)
+        runCatching { startActivity(intent) }.onFailure { say(getString(R.string.no_calendar_app)) }
+    }
+
+    private fun remind(minutes: Int, text: String) {
+        addEvent(System.currentTimeMillis() + minutes * 60_000L, text)
+        say(getString(R.string.reminder_set, minutes, text), 5000)
+    }
+
+    /** Shows reminders that came due, one at a time. */
+    private fun checkReminders(now: Long) {
+        if (now - remindersCheckedAt < 1000 || now < hudUntil) return
+        remindersCheckedAt = now
+        val event = EventCodec.due(EventStore.all(this), System.currentTimeMillis()).firstOrNull() ?: return
+        EventStore.markRung(this, event.id)
+        Log.i("NexusXR", "Reminder shown")
+        feedback.chime()
+        showHud(getString(R.string.reminder) + ": " + event.title, now + 9000)
+    }
+
+    private fun spaceWindows(space: Space) = when (space) {
+        Space.WORK -> settings.workWindows
+        Space.STUDY -> settings.studyWindows
+        Space.CINEMA -> settings.cinemaWindows
+    }
+
+    override fun saveSpace(space: Space) {
+        val look = head.orientation()
+        val layout = LayoutCodec.encode(
+            windows.windows.filter { it.app != AppType.KEYBOARD && it.app != AppType.SPACES }, yawOf(look), pitchOf(look)
+        )
+        if (layout.isEmpty()) return say(getString(R.string.space_empty))
+        when (space) {
+            Space.WORK -> settings.workWindows = layout
+            Space.STUDY -> settings.studyWindows = layout
+            Space.CINEMA -> settings.cinemaWindows = layout
+        }
+        say(getString(R.string.space_saved, spaceName(this, space)))
+    }
+
+    /** Closes what is open and brings back the windows saved in [space], or a starting set. */
+    override fun openSpace(space: Space) {
+        val look = head.orientation()
+        // The assistant stays, so it can finish its reply.
+        for (window in windows.windows.filter { it.app != AppType.ASSISTANT }) {
+            windows.close(window.id)
+            onClosed(window.id)
+        }
+        val saved = LayoutCodec.decode(spaceWindows(space), yawOf(look), pitchOf(look))
+        if (saved.isNotEmpty()) windows.restore(saved) else {
+            val apps = when (space) {
+                Space.WORK -> listOf(AppType.NOTES, AppType.BROWSER, AppType.TASKS)
+                Space.STUDY -> listOf(AppType.NOTES, AppType.CALCULATOR, AppType.CLOCK)
+                Space.CINEMA -> listOf(AppType.MEDIA)
+            }
+            apps.forEach { windows.open(it, yawOf(look), pitchOf(look)) }
+            windows.arrange(yawOf(look), pitchOf(look))
+            if (space == Space.CINEMA) toggleCinema()
+        }
+        say(spaceName(this, space))
+    }
+
+    override fun runRoutine(routine: Routine) {
+        Log.i("NexusXR", "Shortcut with ${routine.steps.size} steps")
+        lifecycleScope.launch { runSteps(routine.steps) }
+    }
+
     override fun videoUri() = video
 
     override fun play(uri: Uri) {
-        video = uri
+        playlist(listOf(uri), 0)
         open(AppType.MEDIA)
     }
 
@@ -1003,6 +1191,14 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             text = text.substringAfter(' ', "").trim()
         }
         if (text.isEmpty()) return
+        // The user's own shortcuts. Their names can never be a built-in command or "confirm".
+        val routine = RoutineBook.parse(settings.routines.ifBlank { getString(R.string.routines_example) }).find(text)
+        if (routine != null) {
+            aiHeld = null
+            commands.forget()
+            say("▶ " + routine.name)
+            return runSteps(routine.steps)
+        }
         val result = commands.handle(text, SystemClock.uptimeMillis())
         // The sentence itself is not logged: it may be something private being typed.
         Log.i("NexusXR", "Heard a " + if (result == null) "request for the AI model" else "built-in command")
@@ -1078,6 +1274,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         is VoiceCommand.ClickLabel -> "click " + command.label
         is VoiceCommand.Timer -> "timer ${command.minutes}"
         is VoiceCommand.AddTask -> "add task " + command.text
+        is VoiceCommand.Remind -> "remind me in ${command.minutes} minutes to ${command.text}"
+        is VoiceCommand.Workspace -> (if (command.save) "save " else "") + command.space.name.lowercase() + " space"
         else -> command.toString().lowercase()
     }
 
@@ -1132,6 +1330,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             }
             is VoiceCommand.Timer -> setTimer(command.minutes)
             is VoiceCommand.AddTask -> TaskStore.add(this, command.text)
+            is VoiceCommand.Remind -> remind(command.minutes, command.text)
+            is VoiceCommand.Workspace -> if (command.save) saveSpace(command.space) else openSpace(command.space)
         }
         return true
     }
@@ -1243,7 +1443,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             Act.HEADSET_OFF -> stereo = false
             Act.CAMERA_VIEW -> { settings.passthrough = true; settingsChanged() }
             Act.VIRTUAL_VIEW -> { settings.passthrough = false; settingsChanged() }
-            Act.NEXT_SCENE -> { settings.scene = (settings.scene + 1) % 4; settings.passthrough = false; settingsChanged() }
+            Act.NEXT_SCENE -> { settings.scene = Places.next(this, settings.scene); settings.passthrough = false; settingsChanged() }
             Act.START_RECORDING -> { if (recording != null) return false; toggleRecording(); return recording != null }
             Act.STOP_RECORDING -> { if (recording == null) return false; toggleRecording() }
             Act.TIME -> say(android.text.format.DateFormat.getTimeFormat(this).format(java.util.Date()), 5000)
@@ -1314,9 +1514,13 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             ?: windows.find(AppType.MEDIA) ?: windows.focused?.takeIf { it.app != AppType.HOME }
             ?: run { open(AppType.MEDIA); windows.find(AppType.MEDIA) } ?: return
         val look = head.orientation()
+        val front = target.copy(curved = true, yaw = yawOf(look), pitch = pitchOf(look), minimized = false)
         windows.replace(
-            if (target.curved) target.copy(curved = false, scale = 1f, distance = 1.7f)
-            else target.copy(curved = true, scale = 1.7f, distance = 2.1f, yaw = yawOf(look), pitch = pitchOf(look), minimized = false)
+            when {
+                !target.curved -> front.copy(scale = 1.7f, distance = 2.1f)
+                target.scale < 2f -> front.copy(scale = SpatialWindow.MAX_SCALE, distance = 2.2f)
+                else -> target.copy(curved = false, scale = 1f, distance = 1.7f)
+            }
         )
         windows.focus(target.id)
     }
@@ -1352,6 +1556,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         private const val TOUCH_POINTER = 100
         private const val GAZE_POINTER = 101
         private const val VOICE_POINTER = 102
+        const val INTRO_MS = 1600f
         private const val STALL_FRAMES = 20
         private val WAKE_WORDS = setOf("nexus", "نكسس", "نيكسس", "نكزس")
         private const val CINEMA_DIM = 0.7f

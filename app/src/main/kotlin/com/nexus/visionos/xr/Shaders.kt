@@ -34,9 +34,9 @@ object Shaders {
             color = vec4(texture(uTexture, (uTransform * vec4(n, 0.0, 1.0)).xy).rgb, 1.0);
         }
     """
-    /** Four original procedural scenes: dusk, night sky, mountains and ocean. */
+    /** Procedural places (dusk, night, mountains, ocean, cinema, space, beach) and a 360° photo (7). */
     const val SKY = ES + PRECISION + """
-        uniform vec2 uTan; uniform vec4 uHead; uniform int uScene; in vec2 vUv; out vec4 color;
+        uniform vec2 uTan; uniform vec4 uHead; uniform int uScene; uniform sampler2D uPhoto; in vec2 vUv; out vec4 color;
         float hash(vec3 p) { return fract(sin(dot(p, vec3(12.99, 78.23, 37.72))) * 4375.85); }
         void main() {
             vec3 d = normalize(vec3((vUv * 2.0 - 1.0) * uTan, -1.0));
@@ -45,7 +45,61 @@ object Shaders {
             float horizon = pow(1.0 - abs(d.y), 10.0);
             float azimuth = atan(d.x, -d.z);
             vec3 sky;
-            if (uScene == 1) {
+            if (uScene == 7) {
+                // Longitude and latitude of the direction pick the pixel of the 360° picture.
+                vec2 at = vec2(azimuth / 6.28318 + 0.5, 0.5 - asin(clamp(d.y, -1.0, 1.0)) / 3.14159);
+                sky = texture(uPhoto, at).rgb;
+            } else if (uScene == 4) {
+                // A dark cinema hall: a faint screen ahead, rows of seats and aisle lights.
+                sky = mix(vec3(0.030, 0.022, 0.028), vec3(0.006, 0.005, 0.008), up);
+                float ahead = max(-d.z, 0.0);
+                vec2 wall = d.xy / max(ahead, 0.05);
+                float frame = step(abs(wall.x), 1.15) * step(abs(wall.y - 0.12), 0.55) * step(0.05, ahead);
+                sky = mix(sky, vec3(0.065, 0.075, 0.095), frame);
+                float folds = 0.5 + 0.5 * sin(azimuth * 70.0);
+                sky += vec3(0.07, 0.008, 0.012) * folds * step(1.0, abs(azimuth)) * (1.0 - up);
+                if (d.y < -0.10) {
+                    vec2 p = d.xz / -d.y;
+                    float row = fract(p.y * 0.9);
+                    float seat = step(row, 0.45) * step(abs(fract(p.x * 1.3) - 0.5), 0.38) * step(0.55, abs(p.x));
+                    sky = mix(vec3(0.018, 0.012, 0.014), vec3(0.11, 0.018, 0.028) * (1.0 - row), seat) * exp(-length(p) * 0.05);
+                    float lamp = exp(-pow((abs(p.x) - 0.45) * 30.0, 2.0)) * smoothstep(0.2, 0.0, abs(fract(p.y * 0.9) - 0.7));
+                    sky += vec3(0.35, 0.22, 0.08) * lamp * exp(-length(p) * 0.1);
+                }
+            } else if (uScene == 5) {
+                // Deep space: stars on every side and a ringless blue planet low to the right.
+                sky = vec3(0.002, 0.003, 0.010);
+                vec3 cell = floor(d * 190.0);
+                float star = step(0.9962, hash(cell)) * smoothstep(0.5, 0.1, length(fract(d * 190.0) - 0.5));
+                sky += vec3(star) * (0.35 + 0.65 * hash(cell + 7.0));
+                float cloud = exp(-pow(dot(d, normalize(vec3(-0.35, 0.75, 0.56))) * 3.2, 2.0));
+                sky += vec3(0.05, 0.02, 0.09) * cloud + vec3(0.0, 0.03, 0.05) * cloud * (0.5 + 0.5 * sin(azimuth * 5.0));
+                vec3 centre = normalize(vec3(0.62, -0.30, -0.72));
+                float away = acos(clamp(dot(d, centre), -1.0, 1.0));
+                if (away < 0.34) {
+                    vec3 side = normalize(d - centre * dot(d, centre)) * (away / 0.34);
+                    vec3 normal = normalize(side + centre * -sqrt(max(1.0 - dot(side, side), 0.0)));
+                    float light = clamp(dot(normal, normalize(vec3(-0.7, 0.5, 0.3))), 0.0, 1.0);
+                    float bands = 0.5 + 0.5 * sin(normal.y * 23.0 + sin(normal.x * 9.0));
+                    sky = mix(vec3(0.05, 0.16, 0.36), vec3(0.18, 0.42, 0.55), bands) * (0.05 + light);
+                }
+                sky += vec3(0.08, 0.22, 0.45) * exp(-abs(away - 0.345) * 70.0);
+            } else if (uScene == 6) {
+                // A beach in daylight: sea at the horizon, sand around the feet.
+                sky = mix(vec3(0.80, 0.90, 0.95), vec3(0.22, 0.52, 0.86), up);
+                vec3 sun = normalize(vec3(-0.45, 0.42, -1.0));
+                sky += vec3(1.0, 0.93, 0.75) * (pow(max(dot(d, sun), 0.0), 900.0) + 0.2 * pow(max(dot(d, sun), 0.0), 14.0));
+                if (d.y < 0.0) {
+                    vec2 p = d.xz / max(-d.y, 0.02);
+                    float shore = -4.0 + 0.5 * sin(p.x * 0.7) + 0.2 * sin(p.x * 2.1);
+                    vec3 sea = mix(vec3(0.10, 0.55, 0.62), vec3(0.03, 0.30, 0.52), clamp((shore - p.y) * 0.08, 0.0, 1.0));
+                    sea += vec3(0.06) * sin(p.y * 4.0 + sin(p.x * 1.3)) * exp(-length(p) * 0.1);
+                    vec3 sand = vec3(0.83, 0.72, 0.52) + vec3(0.05) * (hash(vec3(floor(p * 60.0), 1.0)) - 0.5);
+                    sky = p.y < shore ? sea : sand;
+                    sky = mix(sky, vec3(0.97), smoothstep(0.35, 0.0, abs(p.y - shore)) * 0.8);
+                    sky = mix(sky, vec3(0.72, 0.84, 0.90), smoothstep(0.06, 0.0, -d.y));
+                }
+            } else if (uScene == 1) {
                 sky = mix(vec3(0.035, 0.05, 0.11), vec3(0.004, 0.006, 0.02), up);
                 vec3 cell = floor(d * 140.0);
                 float star = step(0.9965, hash(cell)) * smoothstep(0.5, 0.15, length(fract(d * 140.0) - 0.5));
