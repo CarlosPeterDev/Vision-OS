@@ -74,9 +74,9 @@ class XrRenderer(
 ) : GLSurfaceView.Renderer {
     @Volatile var scene = Scene()
     @Volatile var lastCameraFrameMs = 0L
+        private set
     /** Frames drawn since the camera last delivered one. */
     @Volatile var framesWithoutCamera = 0
-        private set
         private set
     @Volatile var fps = 0
         private set
