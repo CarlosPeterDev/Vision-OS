@@ -332,7 +332,7 @@
     <string name="fit_help">Close one eye at a time and move that picture until it is centred in its lens. Then open both eyes and change the gap until you see one clear picture. If your eyes feel strain, take the headset off.</string>
     <string name="fit_drag_help">Drag each picture with a finger\nTwo fingers: resize\nDouble tap: finish</string>
     <string name="fit_saved">Screen position saved</string>
-    <string name="app_spaces">Spaces & shortcuts</string>
+    <string name="app_spaces">Spaces &amp; shortcuts</string>
     <string name="reminders">Reminders</string>
     <string name="reminder">Reminder</string>
     <string name="reminder_set">I will remind you in %1$d minutes: %2$s</string>
