@@ -541,11 +541,13 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         controller.cancelAll()
         touchRay = null
         showHud(getString(R.string.fit_drag_help), Long.MAX_VALUE)
+        Log.i("NexusXR", "Finger fit on")
     }
 
     private fun stopDragFit() {
         if (!fitDragging) return
         fitDragging = false
+        Log.i("NexusXR", "Finger fit saved: ${settings.fit}")
         say(getString(R.string.fit_saved))
     }
 
@@ -579,7 +581,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             }
             MotionEvent.ACTION_UP -> if (fitMoved < w * 0.02f) {
                 val now = SystemClock.uptimeMillis()
-                if (now - fitTappedAt < 450) stopDragFit() else fitTappedAt = now
+                if (now - fitTappedAt < 600) stopDragFit() else fitTappedAt = now
             }
         }
     }

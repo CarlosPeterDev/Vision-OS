@@ -93,7 +93,7 @@ val APP_INFO: Map<AppType, AppInfo> = listOf(
     AppInfo(AppType.PHOTOS, R.string.app_photos, R.drawable.ic_ui_photos, colours(0xFFFFB45A, 0xFFE0457B)),
     AppInfo(AppType.FILES, R.string.app_files, R.drawable.ic_ui_files, colours(0xFF6FB6FF, 0xFF2C55C9)),
     AppInfo(AppType.CAMERA, R.string.app_camera, R.drawable.ic_ui_camera, colours(0xFF9AA3AE, 0xFF2F353E)),
-    AppInfo(AppType.FIT, R.string.app_fit, R.drawable.ic_ui_resize, colours(0xFF7EE08A, 0xFF1F8A4C)),
+    AppInfo(AppType.FIT, R.string.app_fit, R.drawable.ic_ui_fit, colours(0xFF7EE08A, 0xFF1F8A4C)),
     AppInfo(AppType.TASKS, R.string.app_tasks, R.drawable.ic_ui_tasks, colours(0xFF7FB2FF, 0xFF3B4FD0)),
     AppInfo(AppType.CALENDAR, R.string.app_calendar, R.drawable.ic_ui_calendar, colours(0xFFFF8A80, 0xFFC62828)),
     AppInfo(AppType.PAINT, R.string.app_paint, R.drawable.ic_ui_paint, colours(0xFFFF9ECF, 0xFF8E3CC9)),

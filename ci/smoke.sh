@@ -88,6 +88,33 @@ sleep 1
 adb exec-out screencap -p > smoke/headset-fitted.png
 if [ "$(adb logcat -d -s NexusXR | grep -c 'Command Do done')" -ge 5 ]; then echo "PASS: headset screens moved by voice"; else echo "FAIL: headset fit commands"; fail=1; fi
 adb logcat -d > smoke/logcat-headset.txt
+# Finger fitting through real screen touches: the button in the Screen fit window, a drag on each
+# half, then a double tap. Button position is for the window centred on a 2400x1080 panel.
+adb shell am force-stop $PKG
+adb shell pm clear $PKG > /dev/null
+adb shell pm grant $PKG android.permission.CAMERA
+adb logcat -c
+adb shell am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --es open FIT
+wait_for "Windows placed" 60
+sleep 20
+adb shell input swipe $((W * 59 / 100)) $((H * 317 / 1000)) $((W * 59 / 100)) $((H * 317 / 1000)) 600
+if wait_for "Finger fit on" 20; then
+  sleep 3
+  adb shell input swipe $((W / 4)) $((H / 2)) $((W * 29 / 100)) $((H * 58 / 100)) 600
+  adb shell input swipe $((W * 3 / 4)) $((H / 2)) $((W * 71 / 100)) $((H * 45 / 100)) 600
+  sleep 5
+  adb exec-out screencap -p > smoke/headset-finger-fit.png
+  adb shell "input tap $((W / 4)) $((H / 2)) & sleep 0.25; input tap $((W / 4)) $((H / 2)); wait"
+  wait_for "Finger fit saved" 20
+fi
+# The recording badge must reach both eyes too.
+adb shell am force-stop $PKG
+adb logcat -c
+adb shell am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --ez headset true --ez captureTest true
+wait_for "Photo saved" 60
+sleep 6
+adb exec-out screencap -p > smoke/headset-recording.png
+adb logcat -d >> smoke/logcat-headset.txt
 adb shell am force-stop $PKG
 adb shell am start -W -n $PKG/.MainActivity; sleep 8
 adb exec-out screencap -p > smoke/start-screen.png
