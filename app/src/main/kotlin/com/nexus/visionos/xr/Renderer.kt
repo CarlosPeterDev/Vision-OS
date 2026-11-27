@@ -10,6 +10,10 @@ import android.opengl.GLES20.*
 import android.opengl.GLSurfaceView
 import android.opengl.GLUtils
 import android.opengl.Matrix
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
+import android.text.TextUtils
 import android.util.Log
 import android.view.Surface
 import androidx.camera.core.SurfaceRequest
@@ -25,6 +29,9 @@ import kotlin.math.max
 import kotlin.math.tan
 
 class CursorMark(val position: Vec3, val pinched: Boolean, val progress: Float = 0f)
+
+/** [height] runs from -1, the bottom of the view, to 1, the top. */
+data class SceneMessage(val text: String, val tint: Int, val height: Float)
 
 /** Immutable description of one frame, built on the main thread. */
 class Scene(
@@ -53,8 +60,9 @@ class Scene(
     val occlusion: Boolean = false,
     /** Hands used for occlusion, present even when outlines are hidden. */
     val handShapes: List<List<Point>> = emptyList(),
-    val lensShift: Float = 0f,
-    val lensHeight: Float = 0f,
+    val fit: HeadsetFit = HeadsetFit(),
+    /** Messages drawn inside the 3D picture, so that in headset mode both eyes see them. */
+    val messages: List<SceneMessage> = emptyList(),
     val lensZoom: Float = 1f,
     val cursorScale: Float = 1f,
     val lensGrid: Boolean = false
@@ -128,6 +136,8 @@ class XrRenderer(
     private var width = 1
     private var height = 1
     private val icons = HashMap<Int, Int>()
+    private class Label(val texture: Int, val width: Int, val height: Int)
+    private val labels = HashMap<SceneMessage, Label>()
     private var blurA: Target? = null
     private var blurB: Target? = null
     private var eye: Target? = null
@@ -187,6 +197,7 @@ class XrRenderer(
         // A new context: every old GL object is already gone.
         titles.clear()
         icons.clear()
+        labels.clear()
         blurA = null; blurB = null; eye = null
         camera = null
         cameraRequest?.invalidate()
@@ -270,30 +281,37 @@ class XrRenderer(
         glClear(GL_COLOR_BUFFER_BIT)
         if (s.blank) return
 
-        val eyeWidth = if (s.stereo) width / 2 else width
-        val aspect = eyeWidth.toFloat() / height
-        val blurred = renderBlur(s, q, aspect, eyeWidth)
+        dropUnusedLabels(s)
+        // In headset mode each eye's picture is placed where its lens is.
+        val rects = if (s.stereo) List(2) { s.fit.eye(it, width, height) } else null
+        val eyeWidth = rects?.get(0)?.width ?: width
+        val eyeHeight = rects?.get(0)?.height ?: height
+        val aspect = eyeWidth.toFloat() / eyeHeight
+        val blurred = renderBlur(s, q, aspect, eyeWidth, eyeHeight)
 
-        if (!s.stereo) {
+        if (rects == null) {
             drawEye(s, q, aspect, 0f, null, blurred)
         } else {
-            val buffer = eye?.takeIf { it.width == eyeWidth && it.height == height } ?: run {
+            val buffer = eye?.takeIf { it.width == eyeWidth && it.height == eyeHeight } ?: run {
                 eye?.let(::delete)
-                target(eyeWidth, height).also { eye = it }
+                target(eyeWidth, eyeHeight).also { eye = it }
             }
-            for (side in 0..1) {
+            for ((side, rect) in rects.withIndex()) {
                 drawEye(s, q, aspect, if (side == 0) -s.ipd / 2 else s.ipd / 2, buffer, blurred)
                 glBindFramebuffer(GL_FRAMEBUFFER, 0)
-                glViewport(side * eyeWidth, 0, eyeWidth, height)
+                glViewport(rect.x, rect.y, rect.width, rect.height)
+                // A picture never spills into the other eye's half of the screen.
+                glEnable(GL_SCISSOR_TEST)
+                glScissor(side * (width / 2), 0, width / 2, height)
                 glDisable(GL_BLEND)
                 lensProgram.use()
                 lensProgram.texture("uTexture", buffer.texture, GL_TEXTURE_2D, 0)
                 lensProgram.set("uK", s.distortion)
                 lensProgram.set("uAspect", aspect)
-                lensProgram.set("uCentre", if (side == 0) s.lensShift else -s.lensShift, s.lensHeight)
                 lensProgram.set("uZoom", s.lensZoom)
                 lensProgram.set("uGrid", if (s.lensGrid) 1 else 0)
                 fullScreen(lensProgram)
+                glDisable(GL_SCISSOR_TEST)
             }
         }
         if (!logged) { logged = true; Log.i("NexusXR", "First XR frame rendered") }
@@ -356,10 +374,10 @@ class XrRenderer(
     }
 
     /** One shared, downsampled and blurred copy of the background serves every glass window. */
-    private fun renderBlur(s: Scene, q: Quat, aspect: Float, eyeWidth: Int): Int {
+    private fun renderBlur(s: Scene, q: Quat, aspect: Float, eyeWidth: Int, eyeHeight: Int): Int {
         if (s.quality == 0) return 0
         val w = max(eyeWidth / 8, 16)
-        val h = max(height / 8, 16)
+        val h = max(eyeHeight / 8, 16)
         if (blurA?.width != w || blurA?.height != h) {
             blurA?.let(::delete); blurB?.let(::delete)
             blurA = target(w, h); blurB = target(w, h)
@@ -410,6 +428,8 @@ class XrRenderer(
         glEnable(GL_BLEND)
         drawHands(s)
 
+        drawMessages(s, q, aspect)
+
         for (cursor in s.cursors) {
             // A billboard facing the viewer, so both eyes see the cursor at the same 3D point.
             val p = cursor.position
@@ -422,6 +442,53 @@ class XrRenderer(
             putQuad(p - right * size - up * size, p + right * size - up * size, p - right * size + up * size, p + right * size + up * size)
             submitQuad(ringProgram)
         }
+    }
+
+    /** Head-locked panels a little over a metre away, drawn once for each eye. */
+    private fun drawMessages(s: Scene, q: Quat, aspect: Float) {
+        if (s.messages.isEmpty()) return
+        val distance = 1.2f
+        val halfHeight = tan(Math.toRadians(viewFov(s, aspect) / 2.0)).toFloat() * distance
+        val metresPerPixel = halfHeight * aspect * 2 * MESSAGE_SHARE / MESSAGE_PIXELS
+        for (message in s.messages) {
+            val label = labels.getOrPut(message) { label(message) }
+            val halfW = label.width * metresPerPixel / 2
+            val halfH = label.height * metresPerPixel / 2
+            val y = message.height * halfHeight
+            fun corner(x: Float, dy: Float) = q.rotate(Vec3(x, y + dy, -distance))
+            textureProgram.use()
+            textureProgram.texture("uTexture", label.texture, GL_TEXTURE_2D, 0)
+            textureProgram.set("uAlpha", 1f)
+            putQuad(corner(-halfW, -halfH), corner(halfW, -halfH), corner(-halfW, halfH), corner(halfW, halfH))
+            submitQuad(textureProgram)
+        }
+    }
+
+    private fun label(message: SceneMessage): Label {
+        val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = -1; textSize = 34f }
+        val room = MESSAGE_PIXELS - 56
+        val widest = message.text.split('\n').maxOf { Layout.getDesiredWidth(it, paint) }
+        val textWidth = kotlin.math.ceil(widest).toInt().coerceIn(40, room)
+        val layout = StaticLayout.Builder.obtain(message.text, 0, message.text.length, paint, textWidth)
+            .setAlignment(Layout.Alignment.ALIGN_CENTER)
+            .setMaxLines(4)
+            .setEllipsize(TextUtils.TruncateAt.END)
+            .build()
+        val w = textWidth + 56
+        val h = layout.height + 32
+        val texture = textTexture(w, h) { canvas, _ ->
+            val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = message.tint }
+            canvas.drawRoundRect(0f, 0f, w.toFloat(), h.toFloat(), 30f, 30f, fill)
+            canvas.translate(28f, 16f)
+            layout.draw(canvas)
+        }
+        return Label(texture, w, h)
+    }
+
+    private fun dropUnusedLabels(s: Scene) {
+        if (labels.isEmpty()) return
+        val unused = labels.keys.filter { it !in s.messages }
+        for (key in unused) labels.remove(key)?.let { glDeleteTextures(1, intArrayOf(it.texture), 0) }
     }
 
     private fun glass(s: Scene, blurred: Int, viewportW: Int, viewportH: Int, width: Float, height: Float, radius: Float, focus: Float, alpha: Float) {
@@ -681,6 +748,9 @@ class XrRenderer(
 
     private companion object {
         const val SEGMENTS = 24
+        const val MESSAGE_PIXELS = 720
+        /** The widest message as a share of one eye's view. */
+        const val MESSAGE_SHARE = 0.62f
         val PALM = listOf(Triple(0, 1, 5), Triple(0, 5, 9), Triple(0, 9, 13), Triple(0, 13, 17), Triple(1, 2, 5))
         val BONES = listOf(
             0 to 1, 1 to 2, 2 to 3, 3 to 4, 0 to 5, 5 to 6, 6 to 7, 7 to 8, 5 to 9, 9 to 10, 10 to 11, 11 to 12,

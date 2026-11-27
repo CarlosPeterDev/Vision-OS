@@ -485,4 +485,33 @@ class XrTest {
         val old = LayoutCodec.decode("NOTES,0.0,0.0,1.7,1.0,false", 0f, 0f).single()
         assertEquals(0f, old.width, 0f)
     }
+
+    @Test fun headsetPicturesMoveIndependentlyAndTheGapPushesThemApart() {
+        val plain = HeadsetFit()
+        assertEquals(EyeRect(0, 0, 1200, 1080), plain.eye(0, 2400, 1080))
+        assertEquals(EyeRect(1200, 0, 1200, 1080), plain.eye(1, 2400, 1080))
+        val apart = HeadsetFit(gap = 0.1f, width = 0.8f, height = 0.8f)
+        assertEquals(0, apart.eye(0, 2400, 1080).x)
+        assertEquals(1200 + 120 + 120, apart.eye(1, 2400, 1080).x)
+        val moved = apart.dragged(0, 0.05f, 0.1f)
+        assertEquals(apart.eye(0, 2400, 1080).x + 120, moved.eye(0, 2400, 1080).x)
+        assertEquals(apart.eye(0, 2400, 1080).y + 108, moved.eye(0, 2400, 1080).y)
+        assertEquals(apart.eye(1, 2400, 1080), moved.eye(1, 2400, 1080))
+        val tiny = apart.scaled(0.01f)
+        assertEquals(HeadsetFit.MIN_SIZE, tiny.width, 1e-4f)
+        assertEquals(tiny.width, tiny.height, 1e-4f)
+        val wide = HeadsetFit(width = 1f, height = 0.5f).scaled(2f)
+        assertEquals(0.5f, wide.height, 1e-4f)
+        assertEquals(HeadsetFit.MAX_MOVE, plain.dragged(1, 5f, -5f).rightX, 1e-4f)
+    }
+
+    @Test fun headsetCommandsAreUnderstoodAndThePhoneAppListIsGone() {
+        val commands = VoiceCommands()
+        assertEquals(VoiceCommand.Do(Act.GAP_WIDER), (commands.handle("wider gap", 0) as CommandResult.Run).command)
+        assertEquals(VoiceCommand.Do(Act.GAP_NARROWER), (commands.handle("قرب الشاشتين", 0) as CommandResult.Run).command)
+        assertEquals(VoiceCommand.Open(AppType.FIT), (commands.handle("open screen fit", 0) as CommandResult.Run).command)
+        assertNull(commands.handle("open my apps", 0))
+        val phrases = Act.entries.flatMap { act -> act.phrases.map(VoiceCommands::normalize) }
+        assertEquals(phrases.size, phrases.toSet().size)
+    }
 }

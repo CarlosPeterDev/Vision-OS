@@ -19,32 +19,20 @@ private class Entry(val label: String, val icon: Int, val colours: IntArray, val
 /** A staggered grid of round app icons, in pages. */
 internal fun home(context: Context, shell: Shell): SpatialApp {
     fun app(type: AppType) = APP_INFO.getValue(type).let { Entry(context.getString(it.title), it.icon, it.colours) { shell.open(type) } }
-    val youTube = Entry("YouTube", R.drawable.ic_ui_video, intArrayOf(0xFFFF7A7A.toInt(), 0xFFB3202A.toInt())) {
-        shell.openUrl("https://m.youtube.com")
-    }
     val exit = Entry(context.getString(R.string.exit_spatial), R.drawable.ic_ui_exit, intArrayOf(0xFF8A93A6.toInt(), 0xFF3B414F.toInt())) {
         shell.exit()
-    }
-    fun site(name: String, url: String) = Entry(name, R.drawable.ic_ui_browser, intArrayOf(0xFF7C8CF8.toInt(), 0xFF2F3A8F.toInt())) {
-        shell.openUrl(url)
     }
     // The calculator sits in the very middle of the first page.
     val pages = listOf(
         listOf(
-            listOf(app(AppType.BROWSER), youTube, app(AppType.PHOTOS), app(AppType.FILES)),
+            listOf(app(AppType.BROWSER), app(AppType.PHOTOS), app(AppType.FILES)),
             listOf(app(AppType.NOTES), app(AppType.CLOCK), app(AppType.CALCULATOR), app(AppType.MEDIA), app(AppType.ASSISTANT)),
-            listOf(app(AppType.CAMERA), app(AppType.LAUNCHER), app(AppType.CENTER), app(AppType.SETTINGS))
+            listOf(app(AppType.CAMERA), app(AppType.FIT), app(AppType.CENTER), app(AppType.SETTINGS))
         ),
         listOf(
             listOf(app(AppType.TASKS), app(AppType.CALENDAR), app(AppType.WEATHER), app(AppType.PAINT)),
             listOf(app(AppType.CONVERTER), app(AppType.GAMES), app(AppType.VOICE), app(AppType.KEYBOARD)),
             listOf(app(AppType.TUTORIAL), exit)
-        ),
-        // Websites, opened in the built-in browser, which keeps you signed in.
-        listOf(
-            listOf(site("Google", "https://www.google.com"), site("Wikipedia", "https://www.wikipedia.org"), site("Maps", "https://maps.google.com"), site("Translate", "https://translate.google.com")),
-            listOf(site("Facebook", "https://m.facebook.com"), site("WhatsApp Web", "https://web.whatsapp.com"), site("ChatGPT", "https://chatgpt.com"), site("Claude", "https://claude.ai"), site("GitHub", "https://github.com")),
-            listOf(site("X", "https://x.com"), site("Instagram", "https://www.instagram.com"), site("Reddit", "https://www.reddit.com"), site("Netflix", "https://www.netflix.com"))
         )
     )
     var page = 0
@@ -192,6 +180,7 @@ internal fun settingsApp(context: Context, shell: Shell): SpatialApp {
             option({ named(R.string.swap_sides, onOff(settings.swapHandSides)) }) { settings.swapHandSides = !settings.swapHandSides }
         }
         heading(R.string.section_headset)
+        row(height = context.px(52)) { option({ context.getString(R.string.app_fit) }) { shell.open(AppType.FIT) } }
         row(height = context.px(46)) {
             option({ context.getString(R.string.ctl_headset) }) { shell.toggleHeadset() }
             option({ context.getString(R.string.lens_grid) }) { shell.toggleLensGrid() }
@@ -208,8 +197,6 @@ internal fun settingsApp(context: Context, shell: Shell): SpatialApp {
         }
         stepper({ "IPD %.0f mm".format(settings.ipd * 1000) }, { settings.ipd -= 0.002f }, { settings.ipd += 0.002f })
         stepper({ named(R.string.lens_curve, "%.2f".format(settings.distortion)) }, { settings.distortion -= 0.03f }, { settings.distortion += 0.03f })
-        stepper({ named(R.string.lens_spacing, "%.2f".format(settings.lensShift)) }, { settings.lensShift -= 0.01f }, { settings.lensShift += 0.01f })
-        stepper({ named(R.string.lens_height, "%.2f".format(settings.lensHeight)) }, { settings.lensHeight -= 0.01f }, { settings.lensHeight += 0.01f })
         stepper({ named(R.string.lens_zoom, "%.2f".format(settings.lensZoom)) }, { settings.lensZoom -= 0.03f }, { settings.lensZoom += 0.03f })
         heading(R.string.app_voice)
         row(height = context.px(56)) {

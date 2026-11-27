@@ -174,10 +174,10 @@ object Shaders {
     """
     /** Barrel pre-distortion with adjustable lens centre and zoom, plus an alignment grid. */
     const val LENS = ES + PRECISION + """
-        uniform sampler2D uTexture; uniform float uK; uniform float uAspect; uniform vec2 uCentre;
+        uniform sampler2D uTexture; uniform float uK; uniform float uAspect;
         uniform float uZoom; uniform int uGrid; in vec2 vUv; out vec4 color;
         void main() {
-            vec2 p = (vUv - 0.5 - uCentre) * vec2(uAspect, 1.0) * 2.0;
+            vec2 p = (vUv - 0.5) * vec2(uAspect, 1.0) * 2.0;
             vec2 uv = p * (1.0 + uK * dot(p, p)) / (vec2(uAspect, 1.0) * 2.0 * uZoom) + 0.5;
             bool outside = uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0;
             color = outside ? vec4(0.0, 0.0, 0.0, 1.0) : texture(uTexture, uv);

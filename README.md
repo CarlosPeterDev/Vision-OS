@@ -25,8 +25,11 @@ Download the APK from the latest [release](../../releases). It needs Android 10 
 - **Files:** import copies into "My files"; open pictures, video, audio, PDF and text (editable);
   save a copy to Downloads. A chosen phone folder can be browsed read-only.
 - **Apps:** photos, photo and video capture (no sound), notes, tasks, calendar, calculator,
-  converter, paint, games, weather, clock, media player, phone app launcher, keyboard (EN/AR),
-  Nexus assistant, website shortcuts.
+  converter, paint, games, weather, clock, media player, keyboard (EN/AR), Nexus assistant.
+- **Headset screen fit:** move each eye's picture on its own, change the gap, width and height with
+  buttons, by dragging with a finger (two fingers resize, double tap finishes) or by voice ("wider
+  gap", "screens closer", "bigger screens"). Messages and the listening and recording badges are
+  drawn in both eyes.
 - **Voice engine:** ElevenLabs (optional, your own key) with Android speech as fallback.
   See [docs/VOICE.md](docs/VOICE.md).
 
@@ -52,12 +55,13 @@ physical phone.**
 | Website sign-in persistence, file import, PDF viewer, downloads, weather | **Not tested** |
 | GPU hand tracking (off by default, falls back to CPU after a crash) | **Not tested** |
 | Release signing with your key | **Not tested** until the secrets are added |
+| Screen fit by voice, messages drawn in both eyes | Emulator screenshot |
+| Moving screens by finger drag | **Not tested** |
 | Headset optics and comfort | **Not tested**; experimental, seated use only |
 
 ## Limits
 Head tracking is rotation only (no walking around; ARCore position tracking is not built). No eye
-tracking, no true stereo passthrough and no real depth from one camera. Other phone apps open full
-screen, outside spatial mode. Offline recognition depends on your phone: normally Android 12 or
+tracking, no true stereo passthrough and no real depth from one camera. Offline recognition depends on your phone: normally Android 12 or
 newer with the language pack installed. With "Offline only" off, the phone's speech service may
 use the internet; the listening badge shows which service is in use.
 
@@ -79,7 +83,9 @@ The release then has a signed APK and AAB. Keep a private backup of the key. Nev
 4. Sign in to a website, close the browser, open it again.
 5. Files > Import a PDF and a picture and open both.
 6. Take a photo and record a short video, then play it.
-7. Covering or losing the camera shows a stop warning, not a frozen picture.
+7. Home > Screen fit > Drag with finger: line up both pictures, double tap, then put the phone in
+   the headset and fine tune with the buttons. Check that messages look single and sharp.
+8. Covering or losing the camera shows a stop warning, not a frozen picture.
 
 ## Modules
 - `xr-engine`: pure Kotlin math, windows, gestures, commands and small app logic.

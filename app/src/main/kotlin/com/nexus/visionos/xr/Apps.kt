@@ -40,7 +40,7 @@ fun buildApp(context: Context, type: AppType, shell: Shell): SpatialApp = when (
     AppType.PHOTOS -> photos(context, shell)
     AppType.FILES -> files(context, shell)
     AppType.CAMERA -> captureApp(context, shell)
-    AppType.LAUNCHER -> appLauncher(context, shell)
+    AppType.FIT -> headsetFitApp(context, shell)
     AppType.TASKS -> tasksApp(context, shell)
     AppType.CALENDAR -> calendarApp(context)
     AppType.PAINT -> paintApp(context)

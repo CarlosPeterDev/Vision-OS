@@ -101,7 +101,6 @@
     <string name="app_photos">الصور</string>
     <string name="app_files">الملفات</string>
     <string name="app_camera">التصوير</string>
-    <string name="app_launcher">تطبيقاتي</string>
     <string name="net_offline">غير متصل</string>
     <string name="net_wifi">واي فاي</string>
     <string name="net_mobile">بيانات الموبايل</string>
@@ -135,8 +134,6 @@
     <string name="swap_sides">تبديل اليمين والشمال</string>
     <string name="lens_grid">شبكة العدسات</string>
     <string name="lens_curve">انحناء العدسة</string>
-    <string name="lens_spacing">المسافة بين العدستين</string>
-    <string name="lens_height">ارتفاع العدسة</string>
     <string name="lens_zoom">التكبير</string>
     <string name="sounds">الأصوات</string>
     <string name="vibration">الاهتزاز</string>
@@ -320,4 +317,15 @@
         <item>العرض</item>
         <item>النظام</item>
     </string-array>
+    <string name="app_fit">ضبط الشاشتين</string>
+    <string name="fit_drag">حرّك بصباعك</string>
+    <string name="fit_gap">المسافة بين الشاشتين</string>
+    <string name="fit_width">عرض الشاشة</string>
+    <string name="fit_height">طول الشاشة</string>
+    <string name="fit_left">العين الشمال</string>
+    <string name="fit_right">العين اليمين</string>
+    <string name="fit_reset">رجّع الوضع الأصلي</string>
+    <string name="fit_help">غمّض عين وحرّك صورة العين التانية لحد ما تبقى في نص العدسة، وكرر مع العين التانية. بعدين افتح الاتنين وغيّر المسافة لحد ما تشوف صورة واحدة واضحة. لو عينك تعبت اقلع النضارة.</string>
+    <string name="fit_drag_help">اسحب كل صورة بصباعك\nبصباعين: كبّر أو صغّر\nدوستين: خلاص</string>
+    <string name="fit_saved">اتحفظ مكان الشاشتين</string>
 </resources>

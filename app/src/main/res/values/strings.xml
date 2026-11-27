@@ -101,7 +101,6 @@
     <string name="app_photos">Photos</string>
     <string name="app_files">Files</string>
     <string name="app_camera">Capture</string>
-    <string name="app_launcher">My apps</string>
     <string name="net_offline">Offline</string>
     <string name="net_wifi">Wi-Fi</string>
     <string name="net_mobile">Mobile data</string>
@@ -135,8 +134,6 @@
     <string name="swap_sides">Swap left/right</string>
     <string name="lens_grid">Lens grid</string>
     <string name="lens_curve">Lens curve</string>
-    <string name="lens_spacing">Lens spacing</string>
-    <string name="lens_height">Lens height</string>
     <string name="lens_zoom">Zoom</string>
     <string name="sounds">Sounds</string>
     <string name="vibration">Vibration</string>
@@ -320,4 +317,15 @@
         <item>View</item>
         <item>System</item>
     </string-array>
+    <string name="app_fit">Screen fit</string>
+    <string name="fit_drag">Drag with finger</string>
+    <string name="fit_gap">Gap between screens</string>
+    <string name="fit_width">Screen width</string>
+    <string name="fit_height">Screen height</string>
+    <string name="fit_left">Left eye</string>
+    <string name="fit_right">Right eye</string>
+    <string name="fit_reset">Reset screens</string>
+    <string name="fit_help">Close one eye at a time and move that picture until it is centred in its lens. Then open both eyes and change the gap until you see one clear picture. If your eyes feel strain, take the headset off.</string>
+    <string name="fit_drag_help">Drag each picture with a finger\nTwo fingers: resize\nDouble tap: finish</string>
+    <string name="fit_saved">Screen position saved</string>
 </resources>

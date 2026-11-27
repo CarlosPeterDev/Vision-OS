@@ -4,6 +4,7 @@ import android.content.Context
 import com.nexus.xr.ClickStyle
 import com.nexus.xr.GestureConfig
 import com.nexus.xr.HandChoice
+import com.nexus.xr.HeadsetFit
 import kotlin.reflect.KProperty
 
 /** Everything adjustable in spatial mode, kept between launches. */
@@ -41,8 +42,20 @@ class XrSettings(context: Context) {
 
     var ipd by Decimal(0.063f, 0.052f, 0.074f)
     var distortion by Decimal(0.22f, 0f, 0.6f)
-    var lensShift by Decimal(0f, -0.2f, 0.2f)
-    var lensHeight by Decimal(0f, -0.2f, 0.2f)
+    private var fitGap by Decimal(0f, -HeadsetFit.MAX_GAP, HeadsetFit.MAX_GAP)
+    private var fitWidth by Decimal(1f, HeadsetFit.MIN_SIZE, HeadsetFit.MAX_SIZE)
+    private var fitHeight by Decimal(1f, HeadsetFit.MIN_SIZE, HeadsetFit.MAX_SIZE)
+    private var fitLeftX by Decimal(0f, -HeadsetFit.MAX_MOVE, HeadsetFit.MAX_MOVE)
+    private var fitLeftY by Decimal(0f, -HeadsetFit.MAX_MOVE, HeadsetFit.MAX_MOVE)
+    private var fitRightX by Decimal(0f, -HeadsetFit.MAX_MOVE, HeadsetFit.MAX_MOVE)
+    private var fitRightY by Decimal(0f, -HeadsetFit.MAX_MOVE, HeadsetFit.MAX_MOVE)
+    /** Where the two headset pictures sit on the screen. */
+    var fit: HeadsetFit
+        get() = HeadsetFit(fitGap, fitWidth, fitHeight, fitLeftX, fitLeftY, fitRightX, fitRightY)
+        set(value) = value.clamped().let {
+            fitGap = it.gap; fitWidth = it.width; fitHeight = it.height
+            fitLeftX = it.leftX; fitLeftY = it.leftY; fitRightX = it.rightX; fitRightY = it.rightY
+        }
     var lensZoom by Decimal(1f, 0.7f, 1.3f)
 
     var lookAndPinch by Bool(false)

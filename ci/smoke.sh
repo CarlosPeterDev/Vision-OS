@@ -69,7 +69,7 @@ if [ "$(adb logcat -d -s NexusXR | grep -c 'Command Do done')" -ge 3 ]; then ech
 if adb logcat -d -s NexusXR | grep -q "Resizing nexus-.* failed"; then echo "FAIL: reshaping failed"; fail=1; fi
 adb logcat -d > smoke/logcat-voice.txt
 # Screens of other windows, for review.
-for apps in CENTER SETTINGS BROWSER PHOTOS FILES LAUNCHER KEYBOARD TASKS CALENDAR PAINT CONVERTER GAMES WEATHER VOICE; do
+for apps in CENTER SETTINGS BROWSER PHOTOS FILES FIT KEYBOARD TASKS CALENDAR PAINT CONVERTER GAMES WEATHER VOICE; do
   adb shell am force-stop $PKG
   adb shell am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --es open $apps
   sleep 22
@@ -79,11 +79,20 @@ adb shell am force-stop $PKG
 adb shell am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --ez headset true
 sleep 25
 adb exec-out screencap -p > smoke/headset.png
+# Moved, resized pictures with a message and the microphone badge, which both eyes must see.
+adb shell am force-stop $PKG
+adb logcat -c
+adb shell "am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --ez headset true --es say 'smaller screens|smaller screens|wider gap|wider gap|what time is it'"
+for _ in $(seq 1 90); do [ "$(adb logcat -d -s NexusXR | grep -c 'Command Do done')" -ge 5 ] && break; sleep 1; done
+sleep 1
+adb exec-out screencap -p > smoke/headset-fitted.png
+if [ "$(adb logcat -d -s NexusXR | grep -c 'Command Do done')" -ge 5 ]; then echo "PASS: headset screens moved by voice"; else echo "FAIL: headset fit commands"; fail=1; fi
+adb logcat -d > smoke/logcat-headset.txt
 adb shell am force-stop $PKG
 adb shell am start -W -n $PKG/.MainActivity; sleep 8
 adb exec-out screencap -p > smoke/start-screen.png
 adb logcat -d > smoke/logcat-last.txt
-cat smoke/logcat-capture.txt smoke/logcat-voice.txt smoke/logcat-last.txt > smoke/logcat.txt
+cat smoke/logcat-capture.txt smoke/logcat-voice.txt smoke/logcat-headset.txt smoke/logcat-last.txt > smoke/logcat.txt
 grep -E "NexusXR|FATAL EXCEPTION" smoke/logcat.txt > smoke/summary.txt
 grep -q "FATAL EXCEPTION" smoke/logcat.txt && { echo "FAIL: crash detected"; fail=1; }
 if grep -q "Immersive view halted" smoke/logcat.txt; then echo "NOTE: the camera safety stop appeared during this run"; fi

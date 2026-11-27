@@ -38,6 +38,7 @@ import android.view.Surface
 import android.view.View
 import android.view.WindowManager as AndroidWindowManager
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
@@ -73,7 +74,16 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     private lateinit var head: HeadTracker
     private lateinit var hands: HandTracker
     private lateinit var camera: CameraFeed
-    private lateinit var warning: TextView
+    private lateinit var warning: LinearLayout
+    /** The warning twice, side by side, for someone who was wearing the headset. */
+    private lateinit var warningTexts: List<TextView>
+    /** The headset pictures are being placed with a finger on the screen. */
+    private var fitDragging = false
+    private var fitSide = 0
+    private var fitLast = Point(0f, 0f)
+    private var fitSpread = 0f
+    private var fitMoved = 0f
+    private var fitTappedAt = 0L
     private lateinit var voice: VoiceStack
 
     private var stereo = false
@@ -200,12 +210,18 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         renderer = XrRenderer(gl, head::orientation) { action -> runOnUiThread { if (!isDestroyed) action() } }
         gl.setRenderer(renderer)
         gl.setOnTouchListener { _, event -> touchFallback(event); true }
-        warning = TextView(this).apply {
-            setTextColor(Color.WHITE)
-            textSize = 18f
-            gravity = Gravity.CENTER
+        warningTexts = List(2) {
+            TextView(this).apply {
+                setTextColor(Color.WHITE)
+                textSize = 18f
+                gravity = Gravity.CENTER
+                setPadding(48, 48, 48, 48)
+            }
+        }
+        warning = LinearLayout(this).apply {
             setBackgroundColor(0xE6000000.toInt())
-            setPadding(48, 48, 48, 48)
+            layoutDirection = View.LAYOUT_DIRECTION_LTR
+            warningTexts.forEach { addView(it, LinearLayout.LayoutParams(0, -1, 1f)) }
             visibility = View.GONE
             setOnClickListener { resumeFromWarning() }
         }
@@ -325,10 +341,13 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         Log.w("NexusXR", "Immersive view halted")
         stopRecording()
         halted = reason
+        val wasStereo = stereo
         stereo = false
+        fitDragging = false
         gestures.reset()
         controller.cancelAll()
-        warning.text = reason + "\n\n" + getString(R.string.tap_continue)
+        for (text in warningTexts) text.text = reason + "\n\n" + getString(R.string.tap_continue)
+        warningTexts[1].visibility = if (wasStereo) View.VISIBLE else View.GONE
         warning.visibility = View.VISIBLE
     }
 
@@ -383,8 +402,15 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             halt(getString(R.string.camera_stalled))
         }
 
-        val eyeWidth = if (stereo) gl.width / 2 else gl.width
-        val aspect = if (gl.height > 0) eyeWidth.toFloat() / gl.height else 1.7f
+        if (fitDragging && !stereo) {
+            fitDragging = false
+            hudUntil = 0
+        }
+        val aspect = when {
+            gl.height <= 0 -> 1.7f
+            stereo -> settings.fit.eye(0, gl.width, gl.height).aspect
+            else -> gl.width.toFloat() / gl.height
+        }
         placeWhenSettled(now)
         val orientation = head.orientation()
         val quality = minOf(settings.quality, 2 - level)
@@ -483,12 +509,79 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             occlusion = settings.occlusion && level < PerformanceGovernor.MAX_LEVEL,
             environment = settings.scene,
             dim = maxOf(settings.dim, if (cinema) CINEMA_DIM else 0f),
-            lensShift = settings.lensShift, lensHeight = settings.lensHeight, lensZoom = settings.lensZoom,
-            lensGrid = now < lensGridUntil,
+            fit = settings.fit, lensZoom = settings.lensZoom,
+            lensGrid = stereo && (fitDragging || now < lensGridUntil),
+            messages = headsetMessages(),
             stereo = base.stereo, passthrough = base.passthrough, quality = base.quality, ipd = base.ipd,
             distortion = base.distortion, cameraTurns = base.cameraTurns, displayDegrees = base.displayDegrees,
             cameraFov = base.cameraFov, blank = halted != null
         )
+    }
+
+    /**
+     * Flat Android views cover the screen once, so in headset mode only one eye would see them.
+     * They are hidden there and their text is drawn into both eyes instead.
+     */
+    private fun headsetMessages(): List<SceneMessage> {
+        val badges = listOf(
+            Triple(hud, 0xF0101520.toInt(), 0.55f),
+            Triple(listeningBadge, 0xF05A35B5.toInt(), -0.5f),
+            Triple(recordingBadge, 0xF0C01822.toInt(), -0.78f)
+        )
+        for ((badge, _, _) in badges) badge.alpha = if (stereo) 0f else 1f
+        if (!stereo) return emptyList()
+        return badges.filter { it.first.visibility == View.VISIBLE }
+            .map { (badge, tint, height) -> SceneMessage(badge.text.toString(), tint, height) }
+    }
+
+    override fun startDragFit() {
+        stereo = true
+        fitDragging = true
+        fitTappedAt = 0
+        controller.cancelAll()
+        touchRay = null
+        showHud(getString(R.string.fit_drag_help), Long.MAX_VALUE)
+    }
+
+    private fun stopDragFit() {
+        if (!fitDragging) return
+        fitDragging = false
+        say(getString(R.string.fit_saved))
+    }
+
+    /** One finger moves the picture under it, two fingers resize both, a double tap finishes. */
+    private fun dragFit(event: MotionEvent) {
+        val w = gl.width.coerceAtLeast(1).toFloat()
+        val h = gl.height.coerceAtLeast(1).toFloat()
+        fun spread() = if (event.pointerCount < 2) 0f else
+            kotlin.math.hypot(event.getX(0) - event.getX(1), event.getY(0) - event.getY(1))
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                fitSide = if (event.x < w / 2) 0 else 1
+                fitLast = Point(event.x, event.y)
+                fitMoved = 0f
+                fitSpread = 0f
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                fitSpread = spread()
+                fitMoved = w
+            }
+            MotionEvent.ACTION_MOVE -> if (event.pointerCount >= 2) {
+                val now = spread()
+                if (fitSpread > 0 && now > 0) settings.fit = settings.fit.scaled(now / fitSpread)
+                fitSpread = now
+            } else if (fitSpread == 0f) {
+                val dx = event.x - fitLast.x
+                val dy = event.y - fitLast.y
+                fitMoved += kotlin.math.abs(dx) + kotlin.math.abs(dy)
+                fitLast = Point(event.x, event.y)
+                settings.fit = settings.fit.dragged(fitSide, dx / w, -dy / h)
+            }
+            MotionEvent.ACTION_UP -> if (fitMoved < w * 0.02f) {
+                val now = SystemClock.uptimeMillis()
+                if (now - fitTappedAt < 450) stopDragFit() else fitTappedAt = now
+            }
+        }
     }
 
     private fun cancelPointer(state: PointerState, orientation: Quat) =
@@ -639,7 +732,12 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
 
     /** Touch uses the same pointer pipeline as the hands (handheld mode). */
     private fun touchFallback(event: MotionEvent) {
-        if (stereo || halted != null) return
+        if (halted != null) return
+        if (fitDragging) {
+            if (stereo) return dragFit(event)
+            fitDragging = false
+        }
+        if (stereo) return
         val aspect = gl.width.toFloat() / gl.height.coerceAtLeast(1)
         val ray = viewportRay(
             head.orientation(), event.x / gl.width, event.y / gl.height, viewFov(renderer.scene, aspect), aspect
@@ -1134,6 +1232,10 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             Act.DIMMER -> brightness(-0.2f)
             Act.DIM_MORE -> settings.dim += 0.2f
             Act.DIM_LESS -> settings.dim -= 0.2f
+            Act.GAP_WIDER -> settings.fit = settings.fit.let { it.copy(gap = it.gap + 0.02f) }
+            Act.GAP_NARROWER -> settings.fit = settings.fit.let { it.copy(gap = it.gap - 0.02f) }
+            Act.SCREENS_BIGGER -> settings.fit = settings.fit.scaled(1.07f)
+            Act.SCREENS_SMALLER -> settings.fit = settings.fit.scaled(0.93f)
             Act.HEADSET_ON -> stereo = true
             Act.HEADSET_OFF -> stereo = false
             Act.CAMERA_VIEW -> { settings.passthrough = true; settingsChanged() }
@@ -1217,7 +1319,6 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     }
 
     override fun startCalibration() {
-        stereo = false
         controller.cancelAll()
         calibration = Calibration(SystemClock.uptimeMillis())
     }
