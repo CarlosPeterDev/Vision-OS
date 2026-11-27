@@ -903,6 +903,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         }
         recording = capture
         recordingBadge.visibility = View.VISIBLE
+        Log.i("NexusXR", "Recording started")
         renderer.startEncoding(capture.surface, capture.width, capture.height) { stopRecording() }
     }
 

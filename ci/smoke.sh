@@ -111,8 +111,8 @@ fi
 adb shell am force-stop $PKG
 adb logcat -c
 adb shell am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --ez headset true --ez captureTest true
-wait_for "Photo saved" 60
-sleep 6
+wait_for "Recording started" 60
+sleep 1
 adb exec-out screencap -p > smoke/headset-recording.png
 adb logcat -d >> smoke/logcat-headset.txt
 adb shell am force-stop $PKG
