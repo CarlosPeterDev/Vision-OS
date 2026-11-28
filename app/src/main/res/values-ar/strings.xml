@@ -453,4 +453,67 @@
         <item>وضع المشي تتبع خطوة</item>
         <item>الحرارة</item>
     </string-array>
+    <string name="app_native_apps">تطبيقات أندرويد</string>
+    <string name="app_native_window">تطبيق أندرويد</string>
+    <string name="native_open_setup">إعداد تطبيقات أندرويد (اختياري)</string>
+    <string name="native_intro">الميزة دي بتفتح التطبيقات المتوافقة اللي على موبايلك جوه نافذة Nexus. اختيارية وتجريبية. بتستخدم Shizuku وهو تطبيق مجاني منفصل. مش محتاج روت، وتطبيقات Nexus نفسها شغالة من غيره. مش كل التطبيقات هتشتغل: تطبيقات البنوك والفيديو المحمي وغيرها ممكن ترفض.</string>
+    <string name="native_check_installed">Shizuku متثبت</string>
+    <string name="native_check_running">خدمة Shizuku شغالة</string>
+    <string name="native_check_granted">Nexus مسموح له في Shizuku</string>
+    <string name="native_check_ready">جاهز تجرب التطبيقات</string>
+    <string name="native_state_old">فتح تطبيقات أندرويد في نوافذ محتاج أندرويد 12 أو أحدث. باقي Nexus شغال على موبايلك.</string>
+    <string name="native_state_install">الخطوة الجاية: ثبت Shizuku من واحد من الروابط الرسمية.</string>
+    <string name="native_state_start">الخطوة الجاية: شغل Shizuku. على أندرويد 11 أو أحدث: اتصل بالواي فاي، فعل خيارات المطور، افتح Shizuku واختار Pairing، وبعدين من Wireless debugging في إعدادات أندرويد اختار “Pair device with pairing code” واكتب الكود في إشعار Shizuku. ارجع لـ Shizuku ودوس Start. اقرن موبايلك أنت بس، ومتبعتش الكود لأي حد.</string>
+    <string name="native_state_update">الخطوة الجاية: حدث Shizuku لإصدار 13 أو أحدث.</string>
+    <string name="native_state_connect">الخطوة الجاية: دوس اتصال واسمح لـ Nexus من رسالة Shizuku نفسها.</string>
+    <string name="native_state_denied">الإذن اترفض. افتح Shizuku وادخل على التطبيقات المصرح لها واسمح لـ Nexus.</string>
+    <string name="native_state_identity">Shizuku شغال بصلاحيات روت. Nexus بيدعم تشغيله بـ Wireless debugging أو ADB بس.</string>
+    <string name="native_state_ready">جاهز. اختار تطبيق من تحت. كل موبايل وكل تطبيق بيتصرف بشكل مختلف، فده مش ضمان إنه هيشتغل.</string>
+    <string name="native_download">صفحة التحميل الرسمية</string>
+    <string name="native_download_github">الإصدارات الرسمية على GitHub</string>
+    <string name="native_open_shizuku">افتح Shizuku</string>
+    <string name="native_developer_settings">افتح خيارات المطور</string>
+    <string name="native_connect">اتصال</string>
+    <string name="native_guide">دليل الإعداد الرسمي بالصور</string>
+    <string name="native_check_again">افحص تاني</string>
+    <string name="native_search">دور على تطبيق</string>
+    <string name="native_open_in_nexus">افتح %1$s في Nexus</string>
+    <string name="native_cannot_open">الشاشة دي مفتحتش على موبايلك.</string>
+    <string name="native_help_title">مساعدة</string>
+    <string name="native_help">• مفيش خيارات المطور: من إعدادات أندرويد افتح حول الهاتف ودوس على رقم الإصدار سبع مرات. أسامي القوايم بتختلف من موبايل للتاني.
+• بعد إعادة تشغيل الموبايل Shizuku غالباً بيقف: شغله تاني ودوس افحص تاني.
+• علشان تقفل الميزة أو تلغي الإذن: افتح Shizuku وادخل التطبيقات المصرح لها واقفل Nexus.
+• نافذة سودا أو تطبيق مبيفتحش: ممكن التطبيق مبيدعمش شاشة تانية.
+• Nexus عمره ما بيبعت لمسات لشاشات الإعدادات أو الأذونات أو التثبيت أو Shizuku. اقفل النافذة واستخدم الموبايل فيها.
+• زرار السهم في النافذة هو زرار الرجوع. الكتابة من كيبورد Nexus شغالة للحروف الإنجليزي والأرقام والرموز بس.
+• متقفلش أي حماية في الموبايل علشان تطبيق يشتغل.</string>
+    <string name="native_library_ready">اختار تطبيق. زرار السهم في النافذة هو الرجوع.</string>
+    <string name="native_library_setup">تطبيقات أندرويد محتاجة إعداد على شاشة الموبايل. اقلع النضارة الأول.</string>
+    <string name="native_not_ready">تطبيقات أندرويد مش جاهزة. راجع الإعداد.</string>
+    <string name="native_no_display">الموبايل مسمحش بنافذة للتطبيق.</string>
+    <string name="native_launch_refused">أندرويد مفتحش التطبيق في نافذة. افتحه بالطريقة العادية.</string>
+    <string name="native_input_blocked">اللمس ممنوع على الشاشة دي أو متبعتش. استخدم الموبايل في شاشات الأمان.</string>
+    <string name="native_lost">الاتصال بـ Shizuku اتقطع فالنافذة اتقفلت.</string>
+    <string name="native_latin_only">الكتابة في التطبيق ده متاحة بالحروف الإنجليزي والأرقام والرموز بس.</string>
+    <string name="native_install_apk">ثبت ملف APK</string>
+    <string name="native_apk_reading">بيقرا الملف…</string>
+    <string name="native_apk_details">الحزمة: %1$s
+الإصدار: %2$s
+الحجم: %3$s
+بصمة التوقيع SHA-256: %4$s
+المصدر: %5$s
+
+ثبت الملفات اللي بتثق فيها بس. أندرويد هيطلب منك تأكيد.</string>
+    <string name="native_apk_install">كمل</string>
+    <string name="native_apk_no_signer">مش متاحة</string>
+    <string name="native_apk_allow">اسمح لـ Nexus يطلب التثبيت من الشاشة اللي هتفتح، وبعدين اختار الملف تاني.</string>
+    <string name="native_apk_preparing">بيجهز التثبيت…</string>
+    <string name="install_done">اتثبت. بقى على موبايلك زي أي تطبيق.</string>
+    <string name="install_cancelled">التثبيت اتلغى.</string>
+    <string name="install_blocked">أندرويد أو فحص أمان منع التثبيت.</string>
+    <string name="install_conflict">فيه تعارض مع تطبيق متثبت، غالباً علشان موقع بمفتاح مختلف.</string>
+    <string name="install_incompatible">التطبيق مش متوافق مع موبايلك.</string>
+    <string name="install_invalid">ده مش ملف APK سليم. ملفات APK المقسمة وملفات AAB مش مدعومة.</string>
+    <string name="install_space">المساحة مش كفاية.</string>
+    <string name="install_failed">التثبيت فشل.</string>
 </resources>

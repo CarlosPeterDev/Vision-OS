@@ -453,4 +453,67 @@
         <item>Walk mode tracks a step</item>
         <item>Heat</item>
     </string-array>
+    <string name="app_native_apps">Android apps</string>
+    <string name="app_native_window">Android app</string>
+    <string name="native_open_setup">Android apps setup (optional)</string>
+    <string name="native_intro">This opens compatible apps already on your phone inside a Nexus window. It is optional and experimental. It uses Shizuku, a separate free app. Root is not needed, and Nexus’s own apps work without it. Not every app works: banking apps, protected video and some others may refuse.</string>
+    <string name="native_check_installed">Shizuku installed</string>
+    <string name="native_check_running">Shizuku service running</string>
+    <string name="native_check_granted">Nexus allowed in Shizuku</string>
+    <string name="native_check_ready">Ready to try apps</string>
+    <string name="native_state_old">Android apps in windows need Android 12 or newer. The rest of Nexus works on this phone.</string>
+    <string name="native_state_install">Next: install Shizuku from one of the official links.</string>
+    <string name="native_state_start">Next: start Shizuku. On Android 11 or newer: connect to Wi-Fi, turn on Developer options, open Shizuku, choose Pairing, then in Android’s Wireless debugging choose “Pair device with pairing code” and type the code into Shizuku’s notification. Go back to Shizuku and press Start. Only pair your own phone, and never send the code to anyone.</string>
+    <string name="native_state_update">Next: update Shizuku to version 13 or newer.</string>
+    <string name="native_state_connect">Next: press Connect and allow Nexus in Shizuku’s own dialog.</string>
+    <string name="native_state_denied">Permission was denied. Open Shizuku, go to authorised applications and allow Nexus.</string>
+    <string name="native_state_identity">Shizuku is running with root. Nexus only supports starting it with Wireless debugging or ADB.</string>
+    <string name="native_state_ready">Ready. Choose an app below. Each phone and app behaves differently, so this is not a promise that it will work.</string>
+    <string name="native_download">Official download page</string>
+    <string name="native_download_github">Official releases on GitHub</string>
+    <string name="native_open_shizuku">Open Shizuku</string>
+    <string name="native_developer_settings">Open Developer options</string>
+    <string name="native_connect">Connect</string>
+    <string name="native_guide">Official setup guide with pictures</string>
+    <string name="native_check_again">Check again</string>
+    <string name="native_search">Search apps</string>
+    <string name="native_open_in_nexus">Open %1$s in Nexus</string>
+    <string name="native_cannot_open">This screen could not be opened on your phone.</string>
+    <string name="native_help_title">Help</string>
+    <string name="native_help">• No developer options: in Android Settings, open About phone and tap Build number seven times. Menu names differ between phones.
+• After a restart Shizuku usually stops: start it again, then press Check again.
+• To turn this off or remove permission: open Shizuku, authorised applications, and switch Nexus off.
+• Black window or an app that will not open: that app may not support a second screen.
+• Nexus never sends touches to Settings, permission, install or Shizuku screens. Close the window and use the phone for those.
+• The window’s arrow button is Android Back. Typing from the Nexus keyboard works for English letters, numbers and symbols only.
+• Do not turn off any security protection to make an app work.</string>
+    <string name="native_library_ready">Choose an app. The window’s arrow button is Back.</string>
+    <string name="native_library_setup">Android apps need a one-time setup on the phone screen. Take the headset off first.</string>
+    <string name="native_not_ready">Android apps are not ready. Check setup.</string>
+    <string name="native_no_display">This phone did not allow a window for the app.</string>
+    <string name="native_launch_refused">Android did not open this app in a window. Open it normally instead.</string>
+    <string name="native_input_blocked">Input is blocked on this screen, or could not be sent. Use the phone for security screens.</string>
+    <string name="native_lost">The connection to Shizuku was lost, so the window closed.</string>
+    <string name="native_latin_only">Only English letters, numbers and symbols can be typed into this app.</string>
+    <string name="native_install_apk">Install an APK file</string>
+    <string name="native_apk_reading">Reading the file…</string>
+    <string name="native_apk_details">Package: %1$s
+Version: %2$s
+Size: %3$s
+Signer SHA-256: %4$s
+From: %5$s
+
+Only install files you trust. Android will ask you to confirm.</string>
+    <string name="native_apk_install">Continue</string>
+    <string name="native_apk_no_signer">not available</string>
+    <string name="native_apk_allow">Allow Nexus to request installs on the screen that opens, then choose the file again.</string>
+    <string name="native_apk_preparing">Preparing the installation…</string>
+    <string name="install_done">Installed. It is now on your phone like any other app.</string>
+    <string name="install_cancelled">Installation cancelled.</string>
+    <string name="install_blocked">Android or a security check blocked this installation.</string>
+    <string name="install_conflict">This conflicts with an installed app, often because it is signed with a different key.</string>
+    <string name="install_incompatible">This app is not compatible with your phone.</string>
+    <string name="install_invalid">This is not a valid APK. Split APKs and AAB files are not supported.</string>
+    <string name="install_space">There is not enough storage.</string>
+    <string name="install_failed">The installation failed.</string>
 </resources>

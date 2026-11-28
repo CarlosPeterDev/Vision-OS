@@ -14,6 +14,7 @@ interface InteractionListener {
     fun onPressed(region: Region) {}
     /** A drag or resize that really changed the window was released. */
     fun onAdjusted(region: Region) {}
+    fun onBack(windowId: Int) {}
 }
 
 /**
@@ -184,6 +185,7 @@ class InteractionController(private val windows: WindowManager, private val list
         when (button.region) {
             Region.CLOSE -> { windows.close(win.id); listener.onClosed(win.id) }
             Region.MINIMIZE -> windows.minimize(win.id)
+            Region.BACK -> listener.onBack(win.id)
             Region.NEARER -> windows.replace(win.copy(distance = (win.distance - 0.2f).coerceAtLeast(0.9f)))
             Region.FARTHER -> windows.replace(win.copy(distance = (win.distance + 0.2f).coerceAtMost(3.5f)))
             else -> {}

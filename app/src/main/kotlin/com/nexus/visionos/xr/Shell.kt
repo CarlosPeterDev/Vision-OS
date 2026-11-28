@@ -34,6 +34,11 @@ interface Shell {
     val stats: Stats
 
     fun open(app: AppType)
+    /** Opens an installed Android app in the one native window. */
+    fun openNative(packageName: String)
+    /** The setup screen is on the phone itself, not in the headset view. */
+    fun openNativeSetup()
+    fun nativeKeyboard()
     fun openUrl(url: String)
     fun pendingUrl(): String?
     fun typeText(text: String)
@@ -144,7 +149,9 @@ val APP_INFO: Map<AppType, AppInfo> = listOf(
     AppInfo(AppType.CONVERTER, R.string.app_converter, R.drawable.ic_ui_converter, colours(0xFF6EE7C8, 0xFF12806A)),
     AppInfo(AppType.GAMES, R.string.app_games, R.drawable.ic_ui_games, colours(0xFFFFC857, 0xFFD9661F)),
     AppInfo(AppType.WEATHER, R.string.app_weather, R.drawable.ic_ui_weather, colours(0xFF82D8FF, 0xFF2368C4)),
-    AppInfo(AppType.VOICE, R.string.app_voice, R.drawable.ic_ui_mic, colours(0xFFB69CFF, 0xFF5A35B5))
+    AppInfo(AppType.VOICE, R.string.app_voice, R.drawable.ic_ui_mic, colours(0xFFB69CFF, 0xFF5A35B5)),
+    AppInfo(AppType.NATIVE_APPS, R.string.app_native_apps, R.drawable.ic_ui_launcher, colours(0xFF8BE28B, 0xFF23724A)),
+    AppInfo(AppType.NATIVE, R.string.app_native_window, R.drawable.ic_ui_launcher, colours(0xFF8BE28B, 0xFF23724A))
 ).associateBy { it.type }
 
 fun appTitle(context: Context, app: AppType): String = context.getString(APP_INFO.getValue(app).title)

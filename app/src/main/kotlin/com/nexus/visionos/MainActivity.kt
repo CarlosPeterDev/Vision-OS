@@ -70,6 +70,9 @@ class MainActivity : ComponentActivity() {
             label(getString(R.string.app_name), 26f)
             button(getString(R.string.start_spatial)) { startSpatial(false) }
             button(getString(R.string.start_headset)) { confirmHeadset() }
+            button(getString(R.string.native_open_setup)) {
+                startActivity(Intent(this@MainActivity, com.nexus.visionos.nativeapps.NativeAppsActivity::class.java))
+            }
             label(getString(R.string.gesture_help))
             status = label(size = 20f)
             provider = label()

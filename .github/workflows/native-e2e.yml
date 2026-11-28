@@ -1,0 +1,52 @@
+name: Native Apps end to end
+
+# Real Shizuku on an emulator, with a harmless test app of our own.
+on:
+  push:
+    paths: ['ci/native-e2e/**', 'app/src/main/kotlin/com/nexus/visionos/nativeapps/**', 'app/src/main/aidl/**', '.github/workflows/native-e2e.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [33, 34]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: '8.11.1' }
+      - run: gradle :app:assembleDebug --stacktrace
+      - run: bash ci/native-probe/build.sh
+      - name: Download the official Shizuku release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p e2e-input
+          gh release download v13.6.0 --repo RikkaApps/Shizuku --pattern '*.apk' --dir e2e-input
+          mv e2e-input/*.apk e2e-input/shizuku.apk
+          sha256sum e2e-input/shizuku.apk
+          pip install --quiet pillow
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -camera-back virtualscene
+          script: bash ci/native-e2e/run.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: 'e2e-api-${{ matrix.api }}', path: e2e/ }

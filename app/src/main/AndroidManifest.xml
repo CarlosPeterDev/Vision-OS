@@ -13,7 +13,16 @@
     <queries>
         <intent><action android:name="android.speech.RecognitionService" /></intent>
         <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
+        <!-- Native Apps lists only apps with a launcher screen, which needs no broad package access. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <package android:name="moe.shizuku.privileged.api" />
     </queries>
+
+    <!-- Only for "Install an APK file": Android still asks the user to confirm every installation. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- For the user's own reminders; both are optional to the rest of the app. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -38,6 +47,15 @@
             </intent-filter>
         </activity>
         <activity android:name=".SettingsActivity" />
+        <activity android:name=".nativeapps.NativeAppsActivity" android:launchMode="singleTop" />
+        <!-- Required by Shizuku. Only the system and Shizuku hold the permission that guards it. -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
         <activity android:name=".PassthroughActivity" />
         <activity
             android:name=".xr.XrActivity"

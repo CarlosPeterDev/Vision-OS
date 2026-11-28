@@ -903,4 +903,49 @@ class XrTest {
         again.skip(); assertEquals(setOf(Lesson.TAP, Lesson.MOVE), again.practised)
         again.restart(); assertEquals(Lesson.TAP, again.current)
     }
+
+    @Test fun nativeSetupAsksForOneStepAtATime() {
+        val ready = ShizukuStatus(34, installed = true, running = true, version = 13, granted = true, uid = 2000)
+        assertEquals(NativeState.READY, NativeApps.state(ready))
+        assertEquals(NativeState.OLD_ANDROID, NativeApps.state(ready.copy(sdk = 30)))
+        assertEquals(NativeState.INSTALL_SHIZUKU, NativeApps.state(ShizukuStatus(34, installed = false, running = false)))
+        assertEquals(NativeState.START_SHIZUKU, NativeApps.state(ShizukuStatus(34, installed = true, running = false)))
+        assertEquals(NativeState.UPDATE_SHIZUKU, NativeApps.state(ready.copy(version = 12)))
+        // Revoked permission and a stopped service both leave the ready state.
+        assertEquals(NativeState.CONNECT, NativeApps.state(ready.copy(granted = false)))
+        assertEquals(NativeState.DENIED, NativeApps.state(ready.copy(granted = false, deniedForGood = true)))
+        assertEquals(NativeState.START_SHIZUKU, NativeApps.state(ready.copy(running = false)))
+        assertEquals(NativeState.WRONG_IDENTITY, NativeApps.state(ready.copy(uid = 0)))
+    }
+
+    @Test fun securityScreensAreProtectedFromInput() {
+        for (name in listOf("com.android.settings", "com.google.android.permissioncontroller",
+            "com.google.android.packageinstaller", "moe.shizuku.privileged.api", "com.nexus.visionos"))
+            assertTrue(name, NativeApps.isProtected(name, "com.nexus.visionos"))
+        assertFalse(NativeApps.isProtected("com.nexus.probetarget", "com.nexus.visionos"))
+    }
+
+    @Test fun nativeCoordinatesStayOnTheDisplay() {
+        assertEquals(0f, NativeApps.pixel(-0.2f, 480), 0f)
+        assertEquals(240f, NativeApps.pixel(0.5f, 480), 0f)
+        assertEquals(479f, NativeApps.pixel(1f, 480), 0f)
+        assertEquals(209, NativeApps.density(471, 760))
+        assertEquals(120, NativeApps.density(200, 900)); assertEquals(320, NativeApps.density(1500, 1500))
+    }
+
+    @Test fun installStatusesHavePlainOutcomes() {
+        assertEquals(InstallOutcome.NEEDS_CONFIRMATION, installOutcome(-1))
+        assertEquals(InstallOutcome.INSTALLED, installOutcome(0))
+        assertEquals(InstallOutcome.CANCELLED, installOutcome(3))
+        assertEquals(InstallOutcome.CONFLICT, installOutcome(5))
+        assertEquals(InstallOutcome.FAILED, installOutcome(99))
+    }
+
+    @Test fun onlyNativeWindowsHaveABackControlAndTheyAreNotRestored() {
+        val m = WindowManager()
+        val native = m.open(AppType.NATIVE, 0f); val notes = m.open(AppType.NOTES, 0f)
+        assertTrue(controlLayout(native).any { it.region == Region.BACK })
+        assertFalse(controlLayout(notes).any { it.region == Region.BACK })
+        assertEquals(listOf(AppType.NOTES), LayoutCodec.decode(LayoutCodec.encode(m.windows, 0f, 0f), 0f, 0f).map { it.app })
+    }
 }

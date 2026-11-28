@@ -49,6 +49,9 @@ fun buildApp(context: Context, type: AppType, shell: Shell): SpatialApp = when (
     AppType.GAMES -> gamesApp(context)
     AppType.WEATHER -> weatherApp(context, shell)
     AppType.VOICE -> voiceApp(context, shell)
+    AppType.NATIVE_APPS -> nativeLibrary(context, shell)
+    // Drawn by another app on its own display; see XrActivity.syncNative.
+    AppType.NATIVE -> SpatialApp(View(context))
 }
 
 private fun notes(context: Context, shell: Shell): SpatialApp {

@@ -54,6 +54,10 @@ import com.nexus.visionos.VoiceStack
 import kotlinx.coroutines.withTimeoutOrNull
 import com.nexus.visionos.speechAttributes
 import com.nexus.xr.*
+import com.nexus.visionos.nativeapps.NativeAppsActivity
+import com.nexus.visionos.nativeapps.NativeProblem
+import com.nexus.visionos.nativeapps.appLabel
+import com.nexus.visionos.nativeapps.NativeSession
 
 /** The spatial shell: tracking in, window interaction, then one immutable scene per frame out. */
 class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
@@ -136,6 +140,11 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
     private var voiceNotice = ""
     private var resumedAt = 0L
     private var startApp: AppType? = null
+    /** The one window running another Android app. */
+    private var native: NativeSession? = null
+    private var nativeId = -1
+    private var nativePackage: String? = null
+    private var nativeResizing = false
     private var placed = false
     private var stillForward: Vec3? = null
     private var stillSince = 0L
@@ -330,6 +339,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
         open(AppType.HOME)
         // Optionally opens one more window in front. The activity is not exported to other apps.
         startApp = AppType.entries.firstOrNull { it.name == intent.getStringExtra("open") }
+        // Set by the Native Apps screen; this activity is not exported.
+        intent.getStringExtra(EXTRA_NATIVE)?.let { nativePackage = it; startApp = AppType.NATIVE }
         // Test hook (the activity is not exported): one photo, then four seconds of recording.
         if (intent.getBooleanExtra("captureTest", false)) {
             gl.postDelayed({ capturePhoto() }, 12_000)
@@ -387,6 +398,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
     override fun onDestroy() {
         surfaces.values.forEach { it.release() }
         surfaces.clear()
+        native?.release()
+        native = null
         camera.shutdown()
         renderer.walk = null
         walking?.close()
@@ -744,7 +757,9 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
         renderer.scene = Scene(
             windows = shown.map { it.window },
             alphas = shown.associate { it.window.id to it.alpha },
-            titles = shown.associate { it.window.id to appTitle(this, it.window.app) },
+            titles = shown.associate {
+                it.window.id to if (it.window.id == nativeId) nativeTitle() else appTitle(this, it.window.app)
+            },
             focusedId = windows.focused?.id ?: -1,
             highlights = highlighted,
             cursors = cursors,
@@ -830,7 +845,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
     }
 
     override fun airBack() {
-        if (windows.focused?.app == AppType.BROWSER) { act(Act.BACK); return }
+        if (windows.focused?.app == AppType.BROWSER || focusedNative() != null) { act(Act.BACK); return }
         act(Act.HIDE_KEYBOARD)
     }
 
@@ -1081,7 +1096,10 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
         // A closing window keeps its content until its fade has finished.
         surfaces.keys.filter { it !in alive && !animator.isVisible(it) }
             .forEach { id -> surfaces.remove(id)?.release(); renderer.destroyWindow(id) }
+        // Like other windows, it keeps its picture until its closing fade has finished.
+        if (nativeId >= 0 && nativeId !in alive && !animator.isVisible(nativeId)) endNative()
         for (win in windows.windows) {
+            if (win.app == AppType.NATIVE) { syncNative(win); continue }
             surfaces[win.id]?.let { surface ->
                 val w = (win.width * PIXELS_PER_METRE).toInt()
                 val h = (win.height * PIXELS_PER_METRE).toInt()
@@ -1107,6 +1125,87 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
             }
         }
     }
+
+    // ---- Another Android app in a window ----
+
+    private var titleFor = ""
+    private var titleText = ""
+
+    private fun nativeTitle(): String {
+        val name = nativePackage ?: return appTitle(this, AppType.NATIVE)
+        if (name != titleFor) { titleFor = name; titleText = appLabel(this, name) }
+        return titleText
+    }
+
+    private fun nativeSide(metres: Float) = (metres * PIXELS_PER_METRE).toInt().coerceIn(200, 2000)
+
+    private fun syncNative(win: SpatialWindow) {
+        val w = nativeSide(win.width)
+        val h = nativeSide(win.height)
+        val current = native
+        if (current != null && nativeId == win.id) {
+            // The app may redraw or restart on a new size, so it changes once the corner is let go.
+            if ((kotlin.math.abs(w - current.width) > 12 || kotlin.math.abs(h - current.height) > 12) &&
+                !controller.isHeld(win.id) && !nativeResizing
+            ) {
+                nativeResizing = true
+                renderer.resizeWindow(win.id, w, h) {
+                    if (native === current) current.resize(w, h) {}
+                    nativeResizing = false
+                }
+            }
+            return
+        }
+        val packageName = nativePackage ?: return windows.close(win.id)
+        endNative()
+        val session = NativeSession(this, packageName, w, h, { settings.longPressMs.toLong() }, ::nativeProblem)
+        native = session
+        nativeId = win.id
+        renderer.createWindow(win.id, w, h) { target -> if (native === session) session.attach(target) }
+    }
+
+    private fun endNative() {
+        val id = nativeId
+        native?.release()
+        native = null
+        nativeId = -1
+        nativeResizing = false
+        if (id >= 0) renderer.destroyWindow(id)
+    }
+
+    private fun nativeProblem(problem: NativeProblem) {
+        say(
+            getString(
+                when (problem) {
+                    NativeProblem.NOT_READY -> R.string.native_not_ready
+                    NativeProblem.NO_DISPLAY -> R.string.native_no_display
+                    NativeProblem.LAUNCH_REFUSED -> R.string.native_launch_refused
+                    NativeProblem.INPUT_BLOCKED -> R.string.native_input_blocked
+                    NativeProblem.CONNECTION_LOST -> R.string.native_lost
+                }
+            ), 6000
+        )
+        if (problem != NativeProblem.INPUT_BLOCKED && nativeId >= 0) windows.close(nativeId)
+    }
+
+    override fun openNative(packageName: String) {
+        windows.find(AppType.NATIVE)?.let { windows.close(it.id) }
+        endNative()
+        nativePackage = packageName
+        open(AppType.NATIVE)
+    }
+
+    override fun openNativeSetup() {
+        stereo = false // setup is read and tapped on the phone, outside the headset
+        startActivity(Intent(this, NativeAppsActivity::class.java))
+    }
+
+    override fun nativeKeyboard() { open(AppType.KEYBOARD); windows.find(AppType.NATIVE)?.let { windows.focus(it.id) } }
+
+    /** The native window, when it is the one in use. */
+    private fun focusedNative() = native?.takeIf { windows.focused?.id == nativeId }
+
+    override fun onBack(windowId: Int) { if (windowId == nativeId) native?.back() }
 
     /** Touch uses the same pointer pipeline as the hands (handheld mode). */
     private fun touchFallback(event: MotionEvent) {
@@ -1147,7 +1246,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
     // ---- InteractionListener ----
 
     override fun onContentTouch(windowId: Int, action: TouchAction, u: Float, v: Float) {
-        surfaces[windowId]?.touch(action, u, v)
+        if (windowId == nativeId) native?.touch(action, u, v) else surfaces[windowId]?.touch(action, u, v)
     }
 
     override fun onContentHover(windowId: Int, u: Float, v: Float) { surfaces[windowId]?.hover(u, v) }
@@ -1189,10 +1288,13 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
 
     override fun pendingUrl() = url.also { url = null }
     private fun target() = windows.focused?.let { surfaces[it.id] }
-    override fun typeText(text: String) { target()?.type(text) }
+    override fun typeText(text: String) {
+        val app = focusedNative() ?: run { target()?.type(text); return }
+        if (!app.type(text)) say(getString(R.string.native_latin_only), 5000)
+    }
     override fun textBeforeCursor() = target()?.textBeforeCursor().orEmpty()
     override fun replaceBeforeCursor(count: Int, text: String) { target()?.replaceBeforeCursor(count, text) }
-    override fun sendKey(code: Int) { target()?.key(code) }
+    override fun sendKey(code: Int) { focusedNative()?.key(code) ?: target()?.key(code) }
     override fun editAction(action: Int) { target()?.menu(action) }
 
     override fun pickVideo() {
@@ -1651,7 +1753,10 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
             VoiceCommand.Cinema -> toggleCinema()
             VoiceCommand.Photo -> capturePhoto()
             is VoiceCommand.Do -> return act(command.act)
-            is VoiceCommand.Type -> return target()?.takeIf { it.hasTextFocus }?.type(command.text) == true
+            is VoiceCommand.Type -> {
+                focusedNative()?.let { return it.type(command.text) }
+                return target()?.takeIf { it.hasTextFocus }?.type(command.text) == true
+            }
             is VoiceCommand.Search -> openUrl(searchUrl(settings.searchEngine, command.query))
             is VoiceCommand.GoTo -> {
                 val spoken = command.address.trim().replace(Regex("\\s+(dot|دوت|نقطه|نقطة)\\s+", RegexOption.IGNORE_CASE), ".")
@@ -1696,6 +1801,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
             field.key(code)
             return true
         }
+        // "Back" goes to the other app when its window is the one in use.
+        if (act == Act.BACK) focusedNative()?.let { it.back(); return true }
         // The games use the movement words themselves.
         if (focused?.app == AppType.GAMES && surface?.command(act) == true) return true
         val look = look()
@@ -1999,6 +2106,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
 
     companion object {
         const val EXTRA_HEADSET = "headset"
+        const val EXTRA_NATIVE = "native"
         private const val TOUCH_POINTER = 100
         private const val GAZE_POINTER = 101
         private const val VOICE_POINTER = 102

@@ -32,7 +32,7 @@ internal fun home(context: Context, shell: Shell): SpatialApp {
             listOf(app(AppType.CAMERA), app(AppType.FIT), app(AppType.CENTER), app(AppType.SETTINGS))
         ),
         listOf(
-            listOf(app(AppType.TASKS), app(AppType.CALENDAR), app(AppType.WEATHER), app(AppType.PAINT)),
+            listOf(app(AppType.TASKS), app(AppType.CALENDAR), app(AppType.WEATHER), app(AppType.PAINT), app(AppType.NATIVE_APPS)),
             listOf(app(AppType.CONVERTER), app(AppType.GAMES), app(AppType.VOICE), app(AppType.KEYBOARD)),
             listOf(app(AppType.TUTORIAL), app(AppType.PRACTICE), app(AppType.SPACES), app(AppType.CHECKUP), exit)
         )

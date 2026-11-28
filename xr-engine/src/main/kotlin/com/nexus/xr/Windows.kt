@@ -5,7 +5,9 @@ import kotlin.math.*
 enum class AppType {
     HOME, BROWSER, NOTES, CALCULATOR, CLOCK, MEDIA, SETTINGS, ASSISTANT, KEYBOARD,
     CENTER, TUTORIAL, PHOTOS, FILES, CAMERA, FIT, SPACES, PRACTICE, CHECKUP,
-    TASKS, CALENDAR, PAINT, CONVERTER, GAMES, WEATHER, VOICE
+    TASKS, CALENDAR, PAINT, CONVERTER, GAMES, WEATHER, VOICE,
+    /** The list of installed Android apps, and the window one of them runs in. */
+    NATIVE_APPS, NATIVE
 }
 
 /** A flat window on a sphere around the user, always facing the centre. */
@@ -51,7 +53,8 @@ data class SpatialWindow(
     }
 }
 
-enum class Region { CONTENT, TITLE, GRAB, CLOSE, MINIMIZE, FARTHER, NEARER, RESIZE }
+/** BACK exists only on a window running another Android app. */
+enum class Region { CONTENT, TITLE, GRAB, CLOSE, MINIMIZE, FARTHER, NEARER, RESIZE, BACK }
 
 /** [u] and [v] are content coordinates in [0,1] from the top left (clamped outside it). */
 data class Hit(val windowId: Int, val region: Region, val t: Float, val u: Float, val v: Float)
@@ -71,7 +74,8 @@ fun controlLayout(win: SpatialWindow): List<Control> {
     val first = grabHalf + gap + r
     val second = first + 2 * r + gap
     val resizeX = maxOf(win.w / 2, second + r + gap + 0.035f)
-    return listOf(
+    val back = if (win.app == AppType.NATIVE) listOf(Control(Region.BACK, -(second + 2 * r + gap), y, r, r)) else emptyList()
+    return back + listOf(
         Control(Region.CLOSE, -second, y, r, r),
         Control(Region.MINIMIZE, -first, y, r, r),
         Control(Region.GRAB, 0f, y, grabHalf, r),
@@ -158,7 +162,7 @@ object LayoutCodec {
         text.split(';').mapNotNull { item ->
             val p = item.split(',')
             if (p.size != 6 && p.size != 8) return@mapNotNull null
-            val app = AppType.entries.firstOrNull { it.name == p[0] } ?: return@mapNotNull null
+            val app = AppType.entries.firstOrNull { it.name == p[0] && it != AppType.NATIVE } ?: return@mapNotNull null
             val n = (1..4).map { p[it].toFloatOrNull()?.takeIf { v -> v.isFinite() } ?: return@mapNotNull null }
             SpatialWindow(
                 0, app, headYaw + n[0], (headPitch + n[1]).coerceIn(-1.1f, 1.1f), n[2].coerceIn(0.9f, 3.5f),
@@ -236,13 +240,16 @@ class WindowManager(private val maxWindows: Int = 6) {
         AppType.CALCULATOR -> 0.55f to 0.72f
         AppType.BROWSER, AppType.MEDIA, AppType.PHOTOS, AppType.FILES, AppType.PAINT -> 1.2f to 0.75f
         AppType.GAMES -> 0.7f to 0.75f
+        // Most phone apps are drawn for a tall screen.
+        AppType.NATIVE -> 0.62f to 1.0f
         AppType.PRACTICE, AppType.CHECKUP -> 0.9f to 0.78f
         else -> 0.9f to 0.65f
     }
 
     /** Reopens saved windows where they were; the keyboard is never restored. */
     fun restore(saved: List<SpatialWindow>) {
-        for (want in saved.filter { it.app != AppType.KEYBOARD }.take(maxWindows)) {
+        // Another app's window is never reopened by itself: which app it ran is not saved.
+        for (want in saved.filter { it.app != AppType.KEYBOARD && it.app != AppType.NATIVE }.take(maxWindows)) {
             val window = find(want.app) ?: open(want.app, want.yaw, want.pitch)
             replace(
                 window.copy(

@@ -641,6 +641,7 @@ class XrRenderer(
                 Region.FARTHER -> R.drawable.ic_ui_farther
                 Region.NEARER -> R.drawable.ic_ui_nearer
                 Region.RESIZE -> R.drawable.ic_ui_resize
+                Region.BACK -> R.drawable.ic_ui_back
                 else -> 0
             }
             if (control.region == Region.GRAB) hh = 0.013f * grow
