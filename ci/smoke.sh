@@ -116,6 +116,15 @@ adb logcat -c
 adb shell "am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --es say 'morning routine|study mode|remind me in 1 minutes to stretch|next scene|next scene|next scene|next scene|next scene'"
 if wait_for "Shortcut\|Command Do done" 60; then :; fi
 if wait_for "Command Remind done" 90; then
+  # A very slow emulator can trip the camera safety stop while a web page loads. Reminders wait
+  # behind that warning, so tap it away once, as the user would.
+  for _ in $(seq 1 100); do
+    adb logcat -d -s NexusXR | grep -q "Reminder shown" && break
+    if adb logcat -d -s NexusXR | grep -q "Immersive view halted"; then
+      sleep 3; press 300; break
+    fi
+    sleep 1
+  done
   if wait_for "Reminder shown" 120; then
     sleep 1
     adb exec-out screencap -p > smoke/reminder.png
