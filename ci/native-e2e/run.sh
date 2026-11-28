@@ -17,6 +17,10 @@ finish() {
   adb logcat -d > e2e/logcat.txt
   log > e2e/summary.txt
   cat e2e/summary.txt | tail -80
+  python3 $here/show.py e2e/*.png
+  echo "=== display and buffer messages"
+  cat e2e/display.txt 2>/dev/null
+  grep -iE "bufferqueue|surfacetexture|updateTexImage|nexus-native|nexus-[0-9]|VirtualDisplay" e2e/logcat-first.txt | tail -60
   echo "=== results"; cat e2e/result.txt
   exit $fail
 }
@@ -67,6 +71,7 @@ check "test app opened on it" wait_log "native app open on display" 40
 check "test app reports that display" wait_log "target created on display [1-9]" 30
 sleep 25
 adb exec-out screencap -p > e2e/native-window-red.png
+adb shell "dumpsys display | grep -i -A3 nexus-native; dumpsys SurfaceFlinger --display-id; dumpsys activity activities | grep -iE 'Display #|probetarget'" > e2e/display.txt 2>&1
 check "the app's red screen is visible inside the Nexus window" python3 $here/colour.py e2e/native-window-red.png red
 # A screen touch takes the same ray, window and injection path as a pinch.
 adb shell input swipe $((W / 2)) $((H / 2)) $((W / 2)) $((H / 2)) 600
