@@ -627,6 +627,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
 
     private fun airRay() = viewportRay(head.orientation(), air.cursor.x, air.cursor.y, viewFovNow, viewAspect)
 
+    // Lint mistakes this ordinary Activity method for a library-internal one.
+    @SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (settings.airInput && halted == null && air.key(event)) {
             if (!keyboardSeen) {
