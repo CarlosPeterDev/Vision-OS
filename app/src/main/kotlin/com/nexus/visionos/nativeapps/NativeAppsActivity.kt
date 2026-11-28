@@ -102,7 +102,7 @@ class NativeAppsActivity : ComponentActivity() {
         }
     }
 
-    private fun refresh() = runOnUiThread {
+    private fun refresh(): Unit = runOnUiThread {
         val status = ShizukuLink.status(this)
         val state = com.nexus.xr.NativeApps.state(status)
         Log.i("NexusNative", "setup state $state")
