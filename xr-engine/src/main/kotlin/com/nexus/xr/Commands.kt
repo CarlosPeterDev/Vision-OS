@@ -328,6 +328,8 @@ class VoiceCommands(private val confirmWindowMs: Long = 20_000) {
             AppType.PHOTOS to set("photos", "gallery", "الصور", "المعرض"),
             AppType.FILES to set("files", "my files", "الملفات", "ملفات", "ملفاتي"),
             AppType.CAMERA to set("camera", "capture", "الكاميرا", "التصوير"),
+            AppType.PRACTICE to set("practice", "hand practice", "gestures", "التدريب", "تدريب اليد"),
+            AppType.CHECKUP to set("check up", "checkup", "performance", "الفحص", "الاداء"),
             AppType.SPACES to set("shortcuts", "my shortcuts", "spaces", "اختصاراتي", "المساحات"),
             AppType.FIT to set("screen fit", "headset fit", "fit screens", "lens settings", "ضبط الشاشتين", "ضبط النضاره"),
             AppType.TASKS to set("tasks", "to do", "todo list", "to do list", "المهام", "مهامي"),

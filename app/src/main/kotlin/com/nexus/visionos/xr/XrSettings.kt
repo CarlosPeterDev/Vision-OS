@@ -4,7 +4,9 @@ import android.content.Context
 import com.nexus.xr.ClickStyle
 import com.nexus.xr.GestureConfig
 import com.nexus.xr.HandChoice
+import com.nexus.xr.HandPose
 import com.nexus.xr.HeadsetFit
+import com.nexus.xr.PoseAction
 import kotlin.reflect.KProperty
 
 /** Everything adjustable in spatial mode, kept between launches. */
@@ -49,6 +51,11 @@ class XrSettings(context: Context) {
     var cinemaWindows by Text("")
     var dim by Decimal(0f, 0f, 0.85f)
     var showHands by Bool(true)
+    /** A Bluetooth or USB mouse, keyboard or game controller works inside the view. */
+    var airInput by Bool(true)
+    fun poseAction(pose: HandPose): PoseAction =
+        PoseAction.entries.firstOrNull { it.name == prefs.getString("pose_" + pose.name, null) } ?: PoseAction.NOTHING
+    fun setPoseAction(pose: HandPose, action: PoseAction) = prefs.edit().putString("pose_" + pose.name, action.name).apply()
     var occlusion by Bool(false)
     var cameraTurns by Number(0, 0..3)
 

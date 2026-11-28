@@ -4,7 +4,7 @@ import kotlin.math.*
 
 enum class AppType {
     HOME, BROWSER, NOTES, CALCULATOR, CLOCK, MEDIA, SETTINGS, ASSISTANT, KEYBOARD,
-    CENTER, TUTORIAL, PHOTOS, FILES, CAMERA, FIT, SPACES,
+    CENTER, TUTORIAL, PHOTOS, FILES, CAMERA, FIT, SPACES, PRACTICE, CHECKUP,
     TASKS, CALENDAR, PAINT, CONVERTER, GAMES, WEATHER, VOICE
 }
 
@@ -198,6 +198,7 @@ class WindowManager(private val maxWindows: Int = 6) {
         AppType.CALCULATOR -> 0.55f to 0.72f
         AppType.BROWSER, AppType.MEDIA, AppType.PHOTOS, AppType.FILES, AppType.PAINT -> 1.2f to 0.75f
         AppType.GAMES -> 0.7f to 0.75f
+        AppType.PRACTICE, AppType.CHECKUP -> 0.9f to 0.78f
         else -> 0.9f to 0.65f
     }
 

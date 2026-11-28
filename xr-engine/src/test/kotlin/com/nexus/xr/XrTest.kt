@@ -593,4 +593,115 @@ class XrTest {
             assertEquals(language, 3, book.routines.single().steps.size)
         }
     }
+
+    /** A made-up hand: wrist at the bottom, each named finger straight (up) or folded (back). */
+    private fun posedHand(vararg straight: Int, thumbOut: Boolean = false, thumbUp: Boolean = false): Hand {
+        val p = MutableList(21) { Point(0.5f, 0.8f) }
+        val bases = listOf(5 to 0.43f, 9 to 0.49f, 13 to 0.55f, 17 to 0.61f)
+        bases.forEachIndexed { i, (base, x) ->
+            val spread = (x - 0.52f)
+            p[base] = Point(x, 0.6f)
+            p[base + 1] = Point(x + spread * 0.3f, 0.52f)
+            if (i in straight) {
+                p[base + 2] = Point(x + spread * 0.6f, 0.45f); p[base + 3] = Point(x + spread * 0.9f, 0.38f)
+            } else {
+                p[base + 2] = Point(x, 0.58f); p[base + 3] = Point(x, 0.64f)
+            }
+        }
+        p[1] = Point(0.43f, 0.76f); p[2] = Point(0.38f, 0.70f)
+        when {
+            thumbUp -> { p[3] = Point(0.36f, 0.55f); p[4] = Point(0.35f, 0.30f) }
+            thumbOut -> { p[3] = Point(0.33f, 0.67f); p[4] = Point(0.26f, 0.64f) }
+            else -> { p[3] = Point(0.43f, 0.66f); p[4] = Point(0.50f, 0.65f) }
+        }
+        return Hand(1, p)
+    }
+
+    @Test fun handPosesAreToldApartAndAPinchIsNeverOne() {
+        assertEquals(HandPose.VICTORY, classifyPose(posedHand(0, 1), 1f, 0.9f))
+        assertEquals(HandPose.THREE, classifyPose(posedHand(0, 1, 2), 1f, 0.9f))
+        assertEquals(HandPose.HORNS, classifyPose(posedHand(0, 3), 1f, 0.9f))
+        assertEquals(HandPose.CALL, classifyPose(posedHand(3, thumbOut = true), 1f, 0.9f))
+        assertEquals(HandPose.THUMB_UP, classifyPose(posedHand(thumbUp = true), 1f, 0.9f))
+        assertNull(classifyPose(posedHand(0, 1), 1f, 0.2f))
+        assertNull(classifyPose(posedHand(), 1f, 0.9f))
+        assertNull(classifyPose(posedHand(0, 1, 2, 3, thumbOut = true), 1f, 0.9f))
+    }
+
+    @Test fun aHeldPoseFiresOnceUntilLetGo() {
+        val hold = PoseHold(1000)
+        assertNull(hold.update(HandPose.VICTORY, 0))
+        assertNull(hold.update(HandPose.VICTORY, 999))
+        assertEquals(HandPose.VICTORY, hold.update(HandPose.VICTORY, 1000))
+        assertNull(hold.update(HandPose.VICTORY, 5000))
+        assertNull(hold.update(null, 5100))
+        assertNull(hold.update(HandPose.VICTORY, 5200))
+        assertEquals(HandPose.VICTORY, hold.update(HandPose.VICTORY, 6200))
+    }
+
+    @Test fun everyPoseActionIsARealCommand() {
+        val parser = VoiceCommands()
+        PoseAction.entries.mapNotNull { it.say }.forEach { assertNotNull(it, parser.parse(it)) }
+    }
+
+    @Test fun trackingProblemsAreNamed() {
+        assertEquals(listOf(TrackingProblem.NO_HAND), TrackingAdvice.problems(TrackingSample(0, 40)))
+        assertEquals(listOf(TrackingProblem.SLOW, TrackingProblem.TOO_FAR, TrackingProblem.AT_EDGE),
+            TrackingAdvice.problems(TrackingSample(1, 300, 0.05f, true)))
+        assertEquals(listOf(TrackingProblem.FAILED), TrackingAdvice.problems(TrackingSample(0, 0, error = "x")))
+        assertTrue(TrackingAdvice.problems(TrackingSample(1, 60, 0.3f)).isEmpty())
+    }
+
+    @Test fun theMouseCursorStaysInViewAndARestingStickDoesNotDrift() {
+        val cursor = AirCursor()
+        cursor.stick(0.1f, -0.15f, 0.1f)
+        assertEquals(0.5f, cursor.x, 0f); assertEquals(0.5f, cursor.y, 0f)
+        cursor.stick(1f, 0f, 0.1f)
+        assertTrue(cursor.x > 0.55f)
+        cursor.move(9f, -9f)
+        assertEquals(0.98f, cursor.x, 1e-5f); assertEquals(0.02f, cursor.y, 1e-5f)
+    }
+
+    @Test fun crashReportsNeverContainErrorMessages() {
+        val error = IllegalStateException("password hunter2 in https://secret.example", RuntimeException("token abc"))
+        val report = CrashText.of(error)
+        assertTrue(report.contains("java.lang.IllegalStateException"))
+        assertTrue(report.contains("Caused by: java.lang.RuntimeException"))
+        assertTrue(listOf("hunter2", "secret.example", "token abc").none { it in report })
+    }
+
+    @Test fun suggestionsPredictTheNextWordAndFixSlips() {
+        val words = WordSuggester()
+        repeat(3) { words.learn("morning", "good") }
+        words.learn("luck", "good")
+        assertEquals(listOf("morning", "luck"), words.suggest("", previous = "Good"))
+        assertEquals("luck", words.suggest("l", previous = "good").first())
+        assertTrue("tomorrow" in words.suggest("tomorow"))
+        assertTrue("weather" in words.suggest("waether"))
+        assertEquals("good", words.previousWord("very good mor"))
+        assertEquals("good", words.previousWord("good "))
+        assertEquals("", words.previousWord("good. "))
+        val again = WordSuggester(words.state())
+        assertEquals(listOf("morning", "luck"), again.suggest("", previous = "good"))
+        assertTrue(WordSuggester.oneSlip("helo", "hello"))
+        assertFalse(WordSuggester.oneSlip("hat", "dog"))
+    }
+
+    @Test fun batteryUseIsUnknownUntilEnoughHasBeenMeasured() {
+        val drain = BatteryDrain()
+        drain.add(0, 80, false)
+        assertNull(drain.perHour(299_000, 79))
+        assertEquals(12, drain.perHour(600_000, 78))
+        drain.add(700_000, 78, true)
+        assertNull(drain.perHour(1_200_000, 90))
+        drain.add(1_200_000, 90, false)
+        assertNull(drain.perHour(1_300_000, 90))
+    }
+
+    @Test fun theFrameLogKeepsOnlyTheLastMinute() {
+        val log = FrameLog(3)
+        listOf(2, 30, 40, 50).forEach(log::add)
+        assertEquals(40, log.average())
+        assertEquals(30, log.lowest())
+    }
 }

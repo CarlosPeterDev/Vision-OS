@@ -40,6 +40,8 @@ fun buildApp(context: Context, type: AppType, shell: Shell): SpatialApp = when (
     AppType.CAMERA -> captureApp(context, shell)
     AppType.FIT -> headsetFitApp(context, shell)
     AppType.SPACES -> spacesApp(context, shell)
+    AppType.PRACTICE -> practiceApp(context, shell)
+    AppType.CHECKUP -> checkupApp(context, shell)
     AppType.TASKS -> tasksApp(context, shell)
     AppType.CALENDAR -> calendarApp(context, shell)
     AppType.PAINT -> paintApp(context)
@@ -174,16 +176,17 @@ private fun keyboard(context: Context, shell: Shell): SpatialApp {
     var shift = false
     val store = context.applicationContext.getSharedPreferences("words", Context.MODE_PRIVATE)
     val suggester = WordSuggester(store.getString("learned", "").orEmpty())
-    fun remember(word: String) {
+    fun remember(word: String, previous: String) {
         if (word.isEmpty() || !shell.canSuggest()) return
-        suggester.learn(word)
+        suggester.learn(word, previous)
         store.edit().putString("learned", suggester.state()).apply()
     }
     lateinit var suggestions: LinearLayout
     var offered = emptyList<String>()
     fun suggest() {
-        val word = if (shell.canSuggest()) suggester.currentWord(shell.textBeforeCursor()) else ""
-        val next = suggester.suggest(word)
+        val before = if (shell.canSuggest()) shell.textBeforeCursor() else ""
+        // With a word half typed these finish or fix it; after a space they guess the next one.
+        val next = suggester.suggest(suggester.currentWord(before), previous = suggester.previousWord(before))
         if (next == offered && suggestions.childCount > 0) return
         offered = next
         suggestions.removeAllViews()
@@ -192,9 +195,9 @@ private fun keyboard(context: Context, shell: Shell): SpatialApp {
             val choice = next.getOrNull(i)
             val button = suggestions.key(choice.orEmpty(), 3f, 0x9CD2FF) {
                 if (choice != null && shell.canSuggest()) {
-                    val typed = suggester.currentWord(shell.textBeforeCursor())
-                    shell.replaceBeforeCursor(typed.length, "$choice ")
-                    remember(choice)
+                    val before = shell.textBeforeCursor()
+                    shell.replaceBeforeCursor(suggester.currentWord(before).length, "$choice ")
+                    remember(choice, suggester.previousWord(before))
                 }
             }
             button.visibility = if (choice == null) View.INVISIBLE else View.VISIBLE
@@ -202,7 +205,8 @@ private fun keyboard(context: Context, shell: Shell): SpatialApp {
     }
     /** A space ends a word, which is when it is worth remembering. */
     fun space() {
-        remember(suggester.currentWord(shell.textBeforeCursor()))
+        val before = shell.textBeforeCursor()
+        remember(suggester.currentWord(before), suggester.previousWord(before))
         shell.typeText(" ")
     }
     val view = context.vertical {

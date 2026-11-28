@@ -65,7 +65,9 @@ data class PointerState(
     /** The inside of an open hand is visible, which means it is turned towards the user's face. */
     val palmToUser: Boolean = false,
     /** Thumb to index gap relative to palm size; used for calibration. */
-    val ratio: Float = 1f
+    val ratio: Float = 1f,
+    /** A still hand shape that may have an action of its own. */
+    val pose: HandPose? = null
 )
 
 /**
@@ -135,7 +137,8 @@ class PinchTracker(private val handId: Int, private val config: GestureConfig = 
         }
         val extended = FINGERS.count { (tip, middle) -> dist(tip, 0) > dist(middle, 0) * 1.18f }
         val open = !pinched && extended == 4 && ratio > 0.8f
-        return PointerState(handId, phase, last, open, open && palmFacesUser(hand), ratio)
+        val pose = if (pinched || open) null else classifyPose(hand, aspect, ratio)
+        return PointerState(handId, phase, last, open, open && palmFacesUser(hand), ratio, pose)
     }
 
     /** Called when the hand disappears. A held pinch is cancelled, never treated as a click. */

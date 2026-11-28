@@ -56,6 +56,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Crashes.install(this)
         stack = VoiceStack(this, lifecycleScope, ::fallbackNotice)
         settings = stack.settings
         secrets = stack.secrets

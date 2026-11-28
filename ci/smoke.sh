@@ -69,7 +69,7 @@ if [ "$(adb logcat -d -s NexusXR | grep -c 'Command Do done')" -ge 3 ]; then ech
 if adb logcat -d -s NexusXR | grep -q "Resizing nexus-.* failed"; then echo "FAIL: reshaping failed"; fail=1; fi
 adb logcat -d > smoke/logcat-voice.txt
 # Screens of other windows, for review.
-for apps in CENTER SETTINGS BROWSER PHOTOS FILES FIT SPACES MEDIA KEYBOARD TASKS CALENDAR PAINT CONVERTER GAMES WEATHER VOICE; do
+for apps in CENTER SETTINGS BROWSER PHOTOS FILES FIT SPACES MEDIA KEYBOARD TASKS CALENDAR PAINT CONVERTER GAMES WEATHER VOICE PRACTICE CHECKUP; do
   adb shell am force-stop $PKG
   adb shell am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --es open $apps
   sleep 22
@@ -128,6 +128,19 @@ adb logcat -c
 adb shell "am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --es say 'next scene'"
 if wait_for "Command Do done" 60; then sleep 6; fi
 adb exec-out screencap -p > smoke/new-place.png
+adb logcat -d >> smoke/logcat-batch2.txt
+# Keys from a keyboard must reach the focused field, through the same path a Bluetooth keyboard uses.
+adb shell am force-stop $PKG
+adb logcat -c
+adb shell am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --es open NOTES
+if wait_for "Windows placed" 60; then
+  sleep 20
+  adb shell input text bluetooth
+  adb shell input keyevent KEYCODE_SPACE KEYCODE_K KEYCODE_E KEYCODE_Y KEYCODE_S KEYCODE_X KEYCODE_DEL
+  wait_for "Keys from a keyboard" 20
+  sleep 8
+  adb exec-out screencap -p > smoke/hardware-keyboard.png
+fi
 adb logcat -d >> smoke/logcat-batch2.txt
 # Touch a day in the calendar: its event list must open without a crash.
 adb shell am force-stop $PKG

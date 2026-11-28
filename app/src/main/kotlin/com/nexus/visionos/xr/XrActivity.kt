@@ -52,13 +52,24 @@ import com.nexus.visionos.speechAttributes
 import com.nexus.xr.*
 
 /** The spatial shell: tracking in, window interaction, then one immutable scene per frame out. */
-class XrActivity : ComponentActivity(), Shell, InteractionListener {
+class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
     private val windows = WindowManager()
     private val controller = InteractionController(windows, this)
     private val gestures = GestureEngine()
     private val palm = PalmHold()
     private val menuPalm = PalmHold()
     private val gaze = GazeAim()
+    private val poseHold = PoseHold()
+    private val air = AirInput(this)
+    private var airUntil = 0L
+    private var airDown = false
+    private var viewFovNow = 60f
+    private var viewAspect = 1.7f
+    private var mouseCheckedAt = 0L
+    private var keyboardSeen = false
+    private val frames = FrameLog()
+    private val batteryDrain = BatteryDrain()
+    private var measuredAt = 0L
     private val governor = PerformanceGovernor()
     private val animator = WindowAnimator()
     override val stats = Stats()
@@ -205,6 +216,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.nexus.visionos.Crashes.install(this)
         window.addFlags(AndroidWindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         // Use the whole panel, so the two headset views are centred on the physical screen.
         window.attributes = window.attributes.apply {
@@ -242,6 +254,10 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             Places.load(applicationContext)?.let { picture -> runOnUiThread { renderer.setPhoto(picture) } }
         }
         gl.setOnTouchListener { _, event -> touchFallback(event); true }
+        // A captured mouse reports to the focused view.
+        gl.isFocusable = true
+        gl.isFocusableInTouchMode = true
+        gl.setOnCapturedPointerListener { _, event -> halted == null && air.mouse(event) }
         warningTexts = List(2) {
             TextView(this).apply {
                 setTextColor(Color.WHITE)
@@ -331,6 +347,9 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         touchRay = null
         running = false
         Choreographer.getInstance().removeFrameCallback(frame)
+        air.reset()
+        airDown = false
+        airUntil = 0
         gestures.reset()
         controller.cancelAll()
         voice.engine.cancel()
@@ -378,6 +397,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         val wasStereo = stereo
         stereo = false
         fitDragging = false
+        air.reset()
+        airDown = false
         gestures.reset()
         controller.cancelAll()
         for (text in warningTexts) text.text = reason + "\n\n" + getString(R.string.tap_continue)
@@ -458,6 +479,11 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             displayDegrees = displayRotation * 90, cameraFov = cameraFov
         )
         val fov = viewFov(base, aspect)
+        viewFovNow = fov
+        viewAspect = aspect
+        measure(now)
+        captureMouse(now)
+        if (halted == null) air.step(dt, now)
         val latest = hands.latest
         val fresh = latest != null && now - latest.timeMs < maxOf(300L, latest.latencyMs + 300)
         fun toViewport(p: Point, imageAspect: Float): Point {
@@ -504,7 +530,13 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         // With look-and-pinch the view's centre highlights even before a hand appears.
         val gazing = settings.lookAndPinch && pointers.isEmpty() && halted == null
         if (gazing) controller.handle(GAZE_POINTER, PointerPhase.HOVER, centreRay)
-        controller.retainHovers(pointers.keys + if (gazing) setOf(GAZE_POINTER) else emptySet())
+        // The mouse or controller cursor stays for a while after it was last used.
+        val airing = settings.airInput && halted == null && (airDown || now < airUntil)
+        val airAim = if (airing) viewportRay(orientation, air.cursor.x, air.cursor.y, fov, aspect) else null
+        if (airAim != null) controller.handle(AIR_POINTER, if (airDown) PointerPhase.MOVE else PointerPhase.HOVER, airAim)
+        controller.retainHovers(
+            pointers.keys + (if (gazing) setOf(GAZE_POINTER) else emptySet()) + (if (airing) setOf(AIR_POINTER) else emptySet())
+        )
         // A finger resting on the screen sends no events, so its hold is advanced here.
         touchRay?.let { controller.handle(TOUCH_POINTER, PointerPhase.MOVE, it) }
 
@@ -518,6 +550,11 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         val shortcuts = settings.palmShortcuts
         if (palm.update(shortcuts && free.any { !it.palmToUser }, now)) toggleInFront(AppType.HOME, orientation)
         if (menuPalm.update(shortcuts && free.any { it.palmToUser }, now)) toggleInFront(AppType.CENTER, orientation)
+        // A still hand shape with an action of its own, held for a second.
+        val shape = free.firstNotNullOfOrNull { it.pose }?.takeIf {
+            halted == null && calibration == null && settings.poseAction(it) != PoseAction.NOTHING
+        }
+        poseHold.update(shape, now)?.let { runPose(it) }
         // Where a spoken "click" lands: the hand's cursor if there is one, else the middle of the view.
         aimRay = pointers.keys.firstOrNull()?.let { aims[it] }?.let { viewportRay(orientation, it.x, it.y, fov, aspect) } ?: centreRay
 
@@ -527,9 +564,11 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             val distance = windows.pick(ray)?.t ?: 1.5f
             val progress = controller.capturedWindow(p.handId)?.let { surfaces[it]?.holdProgress } ?: 0f
             CursorMark(ray.direction * (distance * 0.98f), controller.isCapturing(p.handId), progress)
-        } + if (gazing) {
+        } + (if (gazing) {
             listOf(CursorMark(centreRay.direction * ((windows.pick(centreRay)?.t ?: 1.5f) * 0.98f), false))
-        } else emptyList()
+        } else emptyList()) + (if (airAim != null) {
+            listOf(CursorMark(airAim.direction * ((windows.pick(airAim)?.t ?: 1.5f) * 0.98f), airDown))
+        } else emptyList())
 
         val shown = animator.update(windows.windows, dt, level)
         syncSurfaces()
@@ -554,6 +593,133 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
             distortion = base.distortion, cameraTurns = base.cameraTurns, displayDegrees = base.displayDegrees,
             cameraFov = base.cameraFov, blank = halted != null
         )
+    }
+
+    private fun runPose(pose: HandPose) {
+        val action = settings.poseAction(pose)
+        val label = poseName(this, pose) + " → " + actionName(this, action)
+        Log.i("NexusXR", "Hand shape $pose ran $action")
+        feedback.click()
+        when (action) {
+            PoseAction.VOICE -> toggleVoiceControl()
+            PoseAction.HEADSET -> { toggleHeadset(); say(label) }
+            else -> action.say?.let { commands.parse(it) }?.let { perform(it, label) }
+        }
+    }
+
+    // ---- Mouse, keyboard and game controller ----
+
+    private fun hasMouse() = android.view.InputDevice.getDeviceIds().any {
+        android.view.InputDevice.getDevice(it)?.supportsSource(android.view.InputDevice.SOURCE_MOUSE) == true
+    }
+
+    /** A connected mouse drives the cursor in the view instead of the phone's own flat pointer. */
+    private fun captureMouse(now: Long) {
+        if (now - mouseCheckedAt < 1000) return
+        mouseCheckedAt = now
+        val wanted = settings.airInput && halted == null && hasWindowFocus() && hasMouse()
+        if (wanted && !gl.hasPointerCapture()) {
+            gl.requestFocus()
+            gl.requestPointerCapture()
+            Log.i("NexusXR", "Mouse taken for the view")
+        } else if (!wanted && gl.hasPointerCapture()) gl.releasePointerCapture()
+    }
+
+    private fun airRay() = viewportRay(head.orientation(), air.cursor.x, air.cursor.y, viewFovNow, viewAspect)
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (settings.airInput && halted == null && air.key(event)) {
+            if (!keyboardSeen) {
+                keyboardSeen = true
+                Log.i("NexusXR", "Keys from a keyboard or controller are in use")
+            }
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        if (settings.airInput && halted == null && air.joystick(event)) return true
+        return super.dispatchGenericMotionEvent(event)
+    }
+
+    override fun airMoved() { airUntil = SystemClock.uptimeMillis() + AIR_SHOWN_MS }
+
+    override fun airButton(down: Boolean) {
+        if (down == airDown || halted != null) return
+        airMoved()
+        airDown = down
+        controller.handle(AIR_POINTER, if (down) PointerPhase.DOWN else PointerPhase.UP, airRay())
+    }
+
+    override fun airScroll(direction: Int) {
+        airMoved()
+        // The window under the cursor scrolls; with none there, the focused one.
+        val under = windows.pick(airRay())?.let { surfaces[it.windowId] }
+        (under ?: target())?.scroll(direction)
+    }
+
+    override fun airBack() {
+        if (windows.focused?.app == AppType.BROWSER) { act(Act.BACK); return }
+        act(Act.HIDE_KEYBOARD)
+    }
+
+    override fun airHome() = toggleInFront(AppType.HOME, head.orientation())
+
+    override fun airKeyboard() {
+        if (windows.find(AppType.KEYBOARD) == null) act(Act.SHOW_KEYBOARD) else act(Act.HIDE_KEYBOARD)
+    }
+
+    override fun airRecenter() = recenter()
+    override fun airType(text: String) = typeText(text)
+    override fun airKey(code: Int) = sendKey(code)
+    override fun airEdit(action: Int) = editAction(action)
+
+    // ---- Speed and battery ----
+
+    /** One reading a second, kept so the check-up window has real history to show. */
+    private fun measure(now: Long) {
+        if (now - measuredAt < 1000) return
+        measuredAt = now
+        if (renderer.fps > 0) frames.add(renderer.fps)
+        val manager = getSystemService(BatteryManager::class.java)
+        batteryDrain.add(SystemClock.elapsedRealtime(), manager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY), manager.isCharging)
+    }
+
+    override fun measurements(): Measurements {
+        val manager = getSystemService(BatteryManager::class.java)
+        val level = manager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        val time = SystemClock.elapsedRealtime()
+        val memory = android.app.ActivityManager.MemoryInfo()
+        getSystemService(android.app.ActivityManager::class.java).getMemoryInfo(memory)
+        return Measurements(
+            renderer.fps, frames.average(), frames.lowest(), frames.count,
+            hands.latest?.latencyMs, hands.gpu,
+            level, manager.isCharging, batteryDrain.perHour(time, level), batteryDrain.measuredMinutes(time),
+            (android.os.Debug.getPss() / 1024).toInt(), (memory.availMem / (1024 * 1024)).toInt()
+        )
+    }
+
+    override fun trackingSample(): TrackingSample {
+        val latest = hands.latest
+        val fresh = latest != null && SystemClock.uptimeMillis() - latest.timeMs < maxOf(500L, latest.latencyMs + 500)
+        val seen = if (latest != null && fresh) latest.hands else emptyList()
+        val first = seen.firstOrNull()
+        val size = if (first == null || latest == null) 0f else kotlin.math.hypot(
+            (first.points[0].x - first.points[9].x) * latest.aspect, first.points[0].y - first.points[9].y
+        )
+        val edge = first?.points?.any { it.x < 0.03f || it.x > 0.97f || it.y < 0.03f || it.y > 0.97f } == true
+        val pointer = pointers[first?.id] ?: pointers.values.firstOrNull()
+        return TrackingSample(
+            seen.size, latest?.latencyMs ?: 0, size, edge, pointer?.ratio ?: 1f,
+            pointers.values.firstNotNullOfOrNull { it.pose }, hands.error
+        )
+    }
+
+    override fun shareText(text: String) {
+        stereo = false // the share sheet is a normal flat screen
+        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
+        runCatching { startActivity(Intent.createChooser(send, null)) }.onFailure { say(getString(R.string.capture_failed)) }
     }
 
     /**
@@ -925,6 +1091,11 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
     override fun addEvent(atMillis: Long, title: String) {
         EventStore.add(applicationContext, atMillis, title)
         if (atMillis > System.currentTimeMillis()) askForNotifications()
+        else {
+            // Still saved to the calendar, but there is nothing left to remind about.
+            Log.i("NexusXR", "Event saved for a time that has passed")
+            say(getString(R.string.event_time_passed), 7000)
+        }
     }
 
     private fun askForNotifications() {
@@ -1556,6 +1727,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener {
         private const val TOUCH_POINTER = 100
         private const val GAZE_POINTER = 101
         private const val VOICE_POINTER = 102
+        private const val AIR_POINTER = 103
+        private const val AIR_SHOWN_MS = 8000L
         const val INTRO_MS = 1600f
         private const val STALL_FRAMES = 20
         private val WAKE_WORDS = setOf("nexus", "نكسس", "نيكسس", "نكزس")

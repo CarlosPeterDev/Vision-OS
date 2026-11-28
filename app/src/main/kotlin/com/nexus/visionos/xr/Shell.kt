@@ -8,6 +8,7 @@ import com.nexus.xr.AppType
 import com.nexus.xr.Routine
 import com.nexus.xr.Space
 import com.nexus.xr.Subtitles
+import com.nexus.xr.TrackingSample
 
 /** Counts of real interactions, which the tutorial watches. */
 class Stats {
@@ -89,6 +90,11 @@ interface Shell {
     fun timerEndsAt(): Long
     fun importFiles()
     fun isGpuTracking(): Boolean
+    /** What the hand tracker sees right now, for the practice window. */
+    fun trackingSample(): TrackingSample
+    fun measurements(): Measurements
+    /** Opens the phone's share sheet; nothing is sent unless the user picks where. */
+    fun shareText(text: String)
     fun exit()
 }
 
@@ -113,6 +119,8 @@ val APP_INFO: Map<AppType, AppInfo> = listOf(
     AppInfo(AppType.CAMERA, R.string.app_camera, R.drawable.ic_ui_camera, colours(0xFF9AA3AE, 0xFF2F353E)),
     AppInfo(AppType.SPACES, R.string.app_spaces, R.drawable.ic_ui_spaces, colours(0xFFB08CFF, 0xFF5A3FC0)),
     AppInfo(AppType.FIT, R.string.app_fit, R.drawable.ic_ui_fit, colours(0xFF7EE08A, 0xFF1F8A4C)),
+    AppInfo(AppType.PRACTICE, R.string.app_practice, R.drawable.ic_ui_practice, colours(0xFFFFA86B, 0xFFC2452F)),
+    AppInfo(AppType.CHECKUP, R.string.app_checkup, R.drawable.ic_ui_checkup, colours(0xFF63E6B5, 0xFF14705F)),
     AppInfo(AppType.TASKS, R.string.app_tasks, R.drawable.ic_ui_tasks, colours(0xFF7FB2FF, 0xFF3B4FD0)),
     AppInfo(AppType.CALENDAR, R.string.app_calendar, R.drawable.ic_ui_calendar, colours(0xFFFF8A80, 0xFFC62828)),
     AppInfo(AppType.PAINT, R.string.app_paint, R.drawable.ic_ui_paint, colours(0xFFFF9ECF, 0xFF8E3CC9)),

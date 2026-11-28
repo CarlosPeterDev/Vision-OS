@@ -13,6 +13,17 @@ Download the APK from the latest [release](../../releases). It needs Android 10 
 - **Hands (MediaPipe):** pinch or direct poke to click, drag to scroll, flick, look-and-pinch,
   calibration, left/right hand choice, hand menu, tutorial. A press is a click; only a hold of
   2 seconds (adjustable) is a long press, and lag does not count towards it.
+- **Hand shortcuts:** five still hand shapes (two or three fingers, thumbs up, two with the little
+  finger) can each be given an action. Held for one second. All are off until you choose.
+- **Hand practice:** what the tracker sees, plain advice when it struggles, a pinch exercise and
+  easier/harder pinch settings.
+- **Keyboard suggestions:** finishes words, guesses the next word from your own typing and fixes
+  one-letter slips. Learned words stay on the phone. There is no swipe typing.
+- **Mouse, keyboard and game controller** (Bluetooth or USB, paired in the phone's settings). A
+  mouse and the left stick move a cursor in the view; keys type into the focused window.
+- **Speed check:** frames per second, tracking delay, memory and battery use per hour (shown only
+  after five measured minutes). Optional crash reports stay on the phone until you share them and
+  leave out error messages and your content. Crashes inside native libraries are not captured.
 - **Voice:** over 100 offline English and Arabic commands for windows, pointing, typing, browser,
   media, view and system. `type …`, `search for …`, `go to …`, `click …`, `set timer for … minutes`,
   `add task …`. The Voice app lists them all.
@@ -58,6 +69,11 @@ physical phone.**
 | Short press opens, 2 s hold is a long press; effects reduce below 15 FPS | Emulator |
 | Photo and video saving | Emulator checks that the save succeeds; the video was not played back |
 | Typing and window reshaping by command | Emulator, by injecting the sentence as text |
+| Keys from a keyboard typed into Notes | Emulator, with injected key events (no real Bluetooth device) |
+| Hand shapes, tracking advice, suggestions, cursor, crash report contents, battery sums | Unit tests with made-up input |
+| Practice and Speed check windows | Emulator screenshot |
+| Real mouse, game controller or Bluetooth keyboard | **Not tested** |
+| Hand shapes with a real hand; catching and sharing a real crash | **Not tested** |
 | Speech recognition (microphone), offline language packs | **Not tested** |
 | AI control with a real provider; ElevenLabs live | **Not tested** |
 | Real hand gestures, direct touch, calibration, hand occlusion | **Not tested** |
@@ -67,6 +83,7 @@ physical phone.**
 | Screen fit by voice, messages drawn in both eyes | Emulator screenshot |
 | Moving screens by finger drag | **Not tested** |
 | Example voice shortcut, study space, spoken 1-minute reminder, new places | Emulator |
+| Warning for an event time that has passed | **Not tested on screen** |
 | Reminder notification with spatial mode closed or after a restart | **Not tested** |
 | Subtitles, playlist, own 360° photo, copying to the phone calendar | **Not tested on Android** (subtitle reading has unit tests) |
 | 3D sound by ear | **Not tested** |

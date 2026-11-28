@@ -32,7 +32,7 @@ internal fun home(context: Context, shell: Shell): SpatialApp {
         listOf(
             listOf(app(AppType.TASKS), app(AppType.CALENDAR), app(AppType.WEATHER), app(AppType.PAINT)),
             listOf(app(AppType.CONVERTER), app(AppType.GAMES), app(AppType.VOICE), app(AppType.KEYBOARD)),
-            listOf(app(AppType.TUTORIAL), app(AppType.SPACES), exit)
+            listOf(app(AppType.TUTORIAL), app(AppType.PRACTICE), app(AppType.SPACES), app(AppType.CHECKUP), exit)
         )
     )
     var page = 0
@@ -180,6 +180,11 @@ internal fun settingsApp(context: Context, shell: Shell): SpatialApp {
             option({ context.getString(R.string.calibrate) }) { shell.startCalibration() }
             option({ named(R.string.swap_sides, onOff(settings.swapHandSides)) }) { settings.swapHandSides = !settings.swapHandSides }
         }
+        row(height = context.px(52)) {
+            option({ context.getString(R.string.app_practice) }) { shell.open(AppType.PRACTICE) }
+            option({ named(R.string.air_input, onOff(settings.airInput)) }) { settings.airInput = !settings.airInput }
+        }
+        text(context.getString(R.string.air_input_help), 11f).alpha = 0.7f
         heading(R.string.section_headset)
         row(height = context.px(52)) { option({ context.getString(R.string.app_fit) }) { shell.open(AppType.FIT) } }
         row(height = context.px(46)) {
