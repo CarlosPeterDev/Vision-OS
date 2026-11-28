@@ -31,7 +31,8 @@ Download the APK from the latest [release](../../releases). It needs Android 10 
   with commands from the same list. Presses, Enter, closing everything, paste, cut, clear and
   risky button names (pay, send, delete and similar) need "confirm". Can be turned off.
 - **Browser:** tabs that reopen, bookmarks, history, downloads, search engine choice, desktop sites.
-  Website sign-ins stay on the phone until you sign out in Settings. Some companies, including
+  A page's full screen video fills the browser window, with an
+  exit button; Back also leaves it. Website sign-ins stay on the phone until you sign out in Settings. Some companies, including
   Google, may refuse sign-in inside a built-in browser.
 - **Files:** import copies into "My files"; open pictures, video, audio, PDF and text (editable);
   save a copy to Downloads. A chosen phone folder can be browsed read-only.
@@ -93,6 +94,10 @@ physical phone.**
 | Same window size in camera view and virtual places | Unit test and emulator screenshots |
 | Walk mode maths (pose joining, rays after walking, picture conversion) | Unit tests with made-up input |
 | Walk mode with real ARCore | **Not tested**; the emulator only checks that asking for it does not crash |
+| Input matches the animated window on screen; overlaps pick the window painted on top | Unit tests |
+| Tutorial counts only the lesson's own action; skipped lessons are not counted | Unit tests; first lesson seen in an emulator screenshot |
+| Browser full screen video | Builds; **not tested** with any video |
+| Opening other Android apps in a window | **Not implemented**; see [feasibility notes](docs/NATIVE_APPS_ARCHITECTURE.md) |
 | Heat steps | Unit tests; **not tested** on a hot phone |
 | Conversation and interruption logic | Unit tests with fake audio; **not tested** with a real microphone |
 | Phone test window | Builds and opens; its tests were **not run** on a phone |
@@ -120,7 +125,7 @@ updating, which deletes sign-ins, notes and imported files. To fix this once:
    and `NEXUS_KEYSTORE_BASE64` (the output of `base64 -w0 nexus.jks`).
 3. Run the Build workflow. Uninstall the old app one last time and install the new APK.
 
-The release then has a signed APK and AAB. Keep a private backup of the key. Never commit it.
+The release then has a signed APK and AAB. Without a key, both are debug-signed. Keep a private backup of the key. Never commit it.
 
 ## Test on a real phone
 1. The camera image is upright and matches where you point (otherwise: Settings > Rotate camera).
