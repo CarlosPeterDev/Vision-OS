@@ -133,9 +133,12 @@ public final class Probe {
     private static String shell(String command) {
         try {
             Process process = new ProcessBuilder("sh", "-c", command).redirectErrorStream(true).start();
-            byte[] out = process.getInputStream().readAllBytes();
+            // InputStream.readAllBytes does not exist before Android 13.
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] chunk = new byte[4096];
+            for (int n; (n = process.getInputStream().read(chunk)) > 0; ) out.write(chunk, 0, n);
             process.waitFor();
-            return new String(out).trim();
+            return out.toString().trim();
         } catch (Exception e) { return e.toString(); }
     }
 }
