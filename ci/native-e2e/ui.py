@@ -23,7 +23,11 @@ while time.time() < end:
                 subprocess.run(['adb', 'shell', 'input', 'tap', str((x1 + x2) // 2), str((y1 + y2) // 2)])
                 print('tapped', node.get('text'))
                 sys.exit(0)
-    subprocess.run(['adb', 'shell', 'input', 'swipe', '500', '1500', '500', '900', '300'])
+    # The test phone is held sideways, so swipe within whatever size the screen is right now.
+    if found:
+        _, _, width, height = map(int, re.findall(r'\d+', found[0].get('bounds')))
+        x, y = str(width // 2), (height * 3 // 4, height // 3)
+        subprocess.run(['adb', 'shell', 'input', 'swipe', x, str(y[0]), x, str(y[1]), '400'])
     time.sleep(2)
 print('not found:', wanted, '| on screen:', seen[:30])
 sys.exit(1)
