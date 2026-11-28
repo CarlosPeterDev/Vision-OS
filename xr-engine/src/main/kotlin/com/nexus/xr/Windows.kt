@@ -20,11 +20,13 @@ data class SpatialWindow(
     val scale: Float = 1f,
     val minimized: Boolean = false,
     /** Bent around the viewer like a cinema screen. */
-    val curved: Boolean = false
+    val curved: Boolean = false,
+    /** The middle of the sphere the window sits on: where the viewer stood when it was placed. */
+    val anchor: Vec3 = Vec3(0f, 0f, 0f)
 ) {
     val w get() = width * scale
     val h get() = height * scale
-    val center get() = direction(yaw, pitch) * distance
+    val center get() = anchor + direction(yaw, pitch) * distance
     val right get() = Vec3(cos(yaw), 0f, sin(yaw))
     val up get() = Vec3(-sin(yaw) * sin(pitch), cos(pitch), cos(yaw) * sin(pitch))
     val forward get() = direction(yaw, pitch)
@@ -32,7 +34,7 @@ data class SpatialWindow(
         if (!curved) return center + right * u + up * v
         // A cylinder of radius [distance] around the viewer; [u] is arc length.
         val angle = u / distance
-        return (forward * cos(angle) + right * sin(angle)) * distance + up * v
+        return anchor + (forward * cos(angle) + right * sin(angle)) * distance + up * v
     }
 
     companion object {
@@ -82,14 +84,23 @@ fun controlLayout(win: SpatialWindow): List<Control> {
 /** Where a ray meets a window: distance along the ray, then local metres from the centre. */
 fun planeHit(ray: Ray, win: SpatialWindow): Triple<Float, Float, Float>? {
     if (win.curved) {
-        // The cylinder is centred on the viewer, so the ray direction decides the arc position.
+        // A cylinder around the window's anchor; the viewer may have walked away from its middle.
+        val from = ray.origin - win.anchor
         val a = ray.direction dot win.right
         val b = ray.direction dot win.up
         val c = ray.direction dot win.forward
-        val flat = hypot(a, c)
-        if (flat < 1e-4f || c <= 0f) return null
-        val t = win.distance / flat
-        return Triple(t, atan2(a, c) * win.distance, t * b)
+        val ox = from dot win.right
+        val oy = from dot win.up
+        val oz = from dot win.forward
+        val flat = a * a + c * c
+        if (flat < 1e-8f) return null
+        val half = ox * a + oz * c
+        val under = half * half - flat * (ox * ox + oz * oz - win.distance * win.distance)
+        if (under < 0f) return null
+        val t = (-half + sqrt(under)) / flat
+        val z = oz + t * c
+        if (t <= 0f || z <= 0f) return null
+        return Triple(t, atan2(ox + t * a, z) * win.distance, oy + t * b)
     }
     val normal = win.forward
     val denom = ray.direction dot normal
@@ -157,6 +168,14 @@ class WindowManager(private val maxWindows: Int = 6) {
     private val items = mutableListOf<SpatialWindow>()
     private var nextId = 1
 
+    /** Where the viewer is now. New, restored and rearranged windows are placed around this point. */
+    var viewer = Vec3(0f, 0f, 0f)
+
+    /** Moves every window along, for when the world under them shifts. */
+    fun shift(by: Vec3) {
+        for (i in items.indices) items[i] = items[i].copy(anchor = items[i].anchor + by)
+    }
+
     /** How far away new and rearranged windows are placed, in metres. */
     var defaultDistance = 1.7f
 
@@ -169,7 +188,9 @@ class WindowManager(private val maxWindows: Int = 6) {
     fun open(app: AppType, headYaw: Float, headPitch: Float = 0f, onEvict: (Int) -> Unit = {}): SpatialWindow {
         val eye = headPitch.coerceIn(-0.7f, 0.7f)
         find(app)?.let { existing ->
-            val shown = if (existing.minimized) existing.copy(minimized = false, yaw = headYaw, pitch = restingPitch(app, eye))
+            val shown = if (existing.minimized) {
+                existing.copy(minimized = false, yaw = headYaw, pitch = restingPitch(app, eye), anchor = viewer)
+            }
             else existing
             replace(shown)
             focus(shown.id)
@@ -187,7 +208,7 @@ class WindowManager(private val maxWindows: Int = 6) {
         val offset = if (keyboard) 0f else floatArrayOf(0f, 0.62f, -0.62f, 1.24f, -1.24f, 0f)[used % 6]
         val window = SpatialWindow(
             nextId++, app, headYaw + offset, restingPitch(app, eye),
-            if (keyboard) 1.35f else defaultDistance, width, height
+            if (keyboard) 1.35f else defaultDistance, width, height, anchor = viewer
         )
         items += window
         return window
@@ -211,7 +232,7 @@ class WindowManager(private val maxWindows: Int = 6) {
                     yaw = want.yaw, pitch = want.pitch, distance = want.distance,
                     width = if (want.width > 0f) want.width else window.width,
                     height = if (want.height > 0f) want.height else window.height,
-                    scale = want.scale, curved = want.curved, minimized = false
+                    scale = want.scale, curved = want.curved, minimized = false, anchor = viewer
                 )
             )
         }
@@ -251,8 +272,15 @@ class WindowManager(private val maxWindows: Int = 6) {
         val visible = items.filter { !it.minimized && it.app != AppType.KEYBOARD }
         visible.forEachIndexed { i, w ->
             val slot = if (i % 2 == 0) i / 2 else -(i + 1) / 2
-            replace(w.copy(yaw = headYaw + slot * 0.68f, pitch = eye, distance = defaultDistance + 0.05f, scale = 1f, curved = false))
+            replace(
+                w.copy(
+                    yaw = headYaw + slot * 0.68f, pitch = eye, distance = defaultDistance + 0.05f, scale = 1f,
+                    curved = false, anchor = viewer
+                )
+            )
         }
-        find(AppType.KEYBOARD)?.let { replace(it.copy(yaw = headYaw, pitch = eye - 0.38f, distance = 1.35f, scale = 1f)) }
+        find(AppType.KEYBOARD)?.let {
+            replace(it.copy(yaw = headYaw, pitch = eye - 0.38f, distance = 1.35f, scale = 1f, anchor = viewer))
+        }
     }
 }

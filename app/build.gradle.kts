@@ -38,6 +38,7 @@ dependencies {
     implementation(project(":ai-assistant"))
     implementation(project(":xr-engine"))
     implementation("com.google.mediapipe:tasks-vision:0.10.26")
+    implementation("com.google.ar:core:1.57.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-ktx:1.9.3")

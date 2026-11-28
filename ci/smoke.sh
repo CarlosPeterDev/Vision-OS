@@ -138,6 +138,19 @@ adb shell "am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --es say 'next
 if wait_for "Command Do done" 60; then sleep 6; fi
 adb exec-out screencap -p > smoke/new-place.png
 adb logcat -d >> smoke/logcat-batch2.txt
+# Walk mode needs ARCore, which this emulator lacks. Asking for it must leave the camera view working.
+adb shell am force-stop $PKG
+adb logcat -c
+adb shell "am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --es say 'walk mode on'"
+if wait_for "Command Do done" 90; then
+  sleep 15
+  adb exec-out screencap -p > smoke/walk-mode.png
+  if adb shell pidof $PKG > /dev/null; then echo "PASS: walk mode request did not crash"; else echo "FAIL: walk mode crashed"; fail=1; fi
+fi
+adb logcat -d >> smoke/logcat-batch2.txt
+adb shell pm clear $PKG > /dev/null
+adb shell pm grant $PKG android.permission.CAMERA
+adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS 2>/dev/null
 # Keys from a keyboard must reach the focused field, through the same path a Bluetooth keyboard uses.
 adb shell am force-stop $PKG
 adb logcat -c

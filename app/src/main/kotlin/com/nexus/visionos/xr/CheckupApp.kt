@@ -30,7 +30,9 @@ internal fun checkupApp(context: Context, shell: Shell): SpatialApp {
     }
     fun toggleLabel() = context.getString(R.string.crash_reports) + ": " +
         context.getString(if (Crashes.isOn(context)) R.string.on else R.string.off)
+    val test = PhoneTest(context, shell)
     val view = context.scrolling {
+        test.build(this)
         figures = text(size = 14f)
         text(context.getString(R.string.crash_note), 11f).alpha = 0.75f
         row(height = context.px(48)) {
@@ -55,6 +57,7 @@ internal fun checkupApp(context: Context, shell: Shell): SpatialApp {
         report.textDirection = android.view.View.TEXT_DIRECTION_FIRST_STRONG
     }
     val stop = ticker(1000) {
+        test.refresh()
         val m = shell.measurements()
         val battery = when {
             m.charging -> context.getString(R.string.check_charging)

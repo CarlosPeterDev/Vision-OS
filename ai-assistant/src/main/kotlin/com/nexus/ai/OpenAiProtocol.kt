@@ -12,13 +12,19 @@ object OpenAiProtocol {
 
     const val ASSISTANT_PROMPT = "You are Nexus, a voice assistant. Answer briefly in plain spoken text, in the user's language."
 
-    fun request(model: String, userText: String, system: String = ASSISTANT_PROMPT): String = buildJsonObject {
+    fun request(
+        model: String, userText: String, system: String = ASSISTANT_PROMPT, history: List<ChatTurn> = emptyList()
+    ): String = buildJsonObject {
         put("model", model)
         put("stream", true)
         putJsonArray("messages") {
             addJsonObject {
                 put("role", "system")
                 put("content", system)
+            }
+            for (turn in history) {
+                addJsonObject { put("role", "user"); put("content", turn.user) }
+                addJsonObject { put("role", "assistant"); put("content", turn.assistant) }
             }
             addJsonObject { put("role", "user"); put("content", userText) }
         }

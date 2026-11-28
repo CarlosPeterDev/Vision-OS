@@ -704,4 +704,126 @@ class XrTest {
         assertEquals(40, log.average())
         assertEquals(30, log.lowest())
     }
+
+    @Test fun cameraAndScenePicturesShareOneFieldOfView() {
+        assertEquals(50f, croppedFov(50f, 4f / 3f), 0.01f)
+        assertEquals(50f, croppedFov(50f, 1.1f), 0.01f)
+        assertEquals(31.3f, croppedFov(50f, 2400f / 1080f), 0.1f)
+    }
+
+    @Test fun walkingKeepsWindowsInTheRoom() {
+        val manager = WindowManager()
+        val first = manager.open(AppType.NOTES, 0f)
+        val place = first.center
+        manager.viewer = Vec3(1f, 0f, -0.5f)
+        assertEquals(place, manager.get(first.id)!!.center)
+        val second = manager.open(AppType.CLOCK, 0f)
+        assertEquals(manager.viewer, second.anchor)
+        manager.shift(Vec3(0f, 0f, 1f))
+        assertEquals(place + Vec3(0f, 0f, 1f), manager.get(first.id)!!.center)
+    }
+
+    @Test fun raysFromAWalkingViewerHitFlatAndCurvedWindows() {
+        for (curved in listOf(false, true)) {
+            val win = SpatialWindow(1, AppType.NOTES, 0f, 0f, 2f, 1f, 0.8f, curved = curved)
+            val from = Vec3(0.3f, 0.1f, -0.5f)
+            val target = win.point(0.2f, 0.15f)
+            val (t, x, y) = planeHit(Ray(from, (target - from).normalized()), win)!!
+            assertEquals((target - from).length, t, 0.01f)
+            assertEquals(0.2f, x, 0.01f)
+            assertEquals(0.15f, y, 0.01f)
+        }
+    }
+
+    @Test fun grabbingAfterWalkingDoesNotMoveTheWindow() {
+        val manager = WindowManager()
+        val win = manager.open(AppType.NOTES, 0f)
+        val controller = InteractionController(manager, object : InteractionListener {
+            override fun onContentTouch(windowId: Int, action: TouchAction, u: Float, v: Float) {}
+            override fun onClosed(windowId: Int) {}
+        })
+        val from = Vec3(0.8f, 0f, 0f)
+        val bar = win.point(0f, win.h / 2 + SpatialWindow.BAR / 2)
+        val ray = Ray(from, (bar - from).normalized())
+        controller.handle(1, PointerPhase.DOWN, ray)
+        controller.handle(1, PointerPhase.MOVE, ray)
+        assertEquals(0f, (manager.get(win.id)!!.center - win.center).length, 0.02f)
+        assertEquals(from, manager.get(win.id)!!.anchor)
+    }
+
+    @Test fun poseFusionStartsWithoutAJumpAndSurvivesLostTracking() {
+        fun turn(yaw: Float) = Quat.axisAngle(Vec3(0f, 1f, 0f), -yaw)
+        val fusion = PoseFusion()
+        assertEquals(turn(0.4f), fusion.pose(turn(0.4f)).orientation)
+        // The tracker has its own idea of forward and of where the middle is.
+        fusion.tracked(turn(2.0f), Vec3(5f, 1f, 5f), turn(0.4f))
+        var pose = fusion.pose(turn(0.4f))
+        assertEquals(0.4f, yawOf(pose.orientation), 0.001f)
+        assertEquals(0f, pose.position.length, 0.001f)
+        // One step along the direction faced is one step forward in the app too.
+        fusion.tracked(turn(2.0f), Vec3(5f, 1f, 5f) + direction(2.0f, 0f), turn(0.4f))
+        pose = fusion.pose(turn(0.4f))
+        assertEquals(0f, (pose.position - direction(0.4f, 0f)).length, 0.001f)
+        // Lost: the place stays, and the motion sensor keeps turning the view.
+        fusion.lost()
+        val lost = fusion.pose(turn(0.9f))
+        assertEquals(0.9f, yawOf(lost.orientation), 0.001f)
+        assertEquals(pose.position, lost.position)
+        fusion.recenter(turn(0.9f))
+        assertEquals(0f, yawOf(fusion.pose(turn(0.9f)).orientation), 0.001f)
+        assertEquals(0f, fusion.pose(turn(0.9f)).position.length, 0.001f)
+    }
+
+    @Test fun pictureCoordinatesTurnBack() {
+        assertEquals(Pair(0.2f, 0.9f), beforeTurn(0.1f, 0.2f, 90))
+        assertEquals(Pair(0.9f, 0.8f), beforeTurn(0.1f, 0.2f, 180))
+        assertEquals(Pair(0.8f, 0.1f), beforeTurn(0.1f, 0.2f, 270))
+        assertEquals(Pair(0.1f, 0.2f), beforeTurn(0.1f, 0.2f, 360))
+        val map = Affine.fromCorners(floatArrayOf(1f, 0f, 1f, 1f, 0f, 0f))
+        assertEquals(Pair(0.75f, 0.5f), map.map(0.5f, 0.25f))
+        val matrix = Affine.textureMatrix(floatArrayOf(0f, 1f, 1f, 1f, 0f, 0f))
+        assertEquals(-1f, matrix[5], 0f)
+        assertEquals(1f, matrix[13], 0f)
+    }
+
+    @Test fun yuvBecomesTheRightColours() {
+        val out = IntArray(4)
+        // A 2x2 picture with padded rows and interleaved colour samples.
+        yuvToArgb(byteArrayOf(0, -1, 0, 0, 76, 76, 0, 0), byteArrayOf(128.toByte(), 0), byteArrayOf(128.toByte(), 0), 2, 2, 4, 2, 2, out)
+        assertEquals(0xFF000000.toInt(), out[0])
+        assertEquals(0xFFFFFFFF.toInt(), out[1])
+        yuvToArgb(ByteArray(4) { 76 }, byteArrayOf(85), byteArrayOf(-1), 2, 2, 2, 1, 1, out)
+        assertTrue(out.all { (it shr 16 and 255) > 250 && (it shr 8 and 255) < 5 && (it and 255) < 5 })
+    }
+
+    @Test fun heatTightensAtOnceAndRelaxesSlowly() {
+        val policy = ThermalPolicy(coolAfterMs = 30_000)
+        assertEquals(HeatLimits.NONE, policy.update(0, Float.NaN, 0))
+        assertEquals(1, policy.update(0, 0.97f, 1000).maxQuality)
+        assertTrue(policy.update(4, Float.NaN, 2000).warn)
+        assertTrue(policy.update(0, Float.NaN, 3000).warn)
+        assertEquals(3, policy.step)
+        policy.update(0, Float.NaN, 33_000)
+        assertEquals(2, policy.step)
+        policy.update(0, Float.NaN, 40_000)
+        assertEquals(2, policy.step)
+        policy.update(0, Float.NaN, 63_000)
+        policy.update(0, Float.NaN, 93_000)
+        assertEquals(HeatLimits.NONE, policy.update(0, Float.NaN, 94_000))
+    }
+
+    @Test fun deviceReportListsWhatPassedFailedAndWasSkipped() {
+        val report = DeviceReport()
+        report.observe(Check.HAND_SEEN, false, "none")
+        assertEquals(Outcome.NOT_RUN, report.get(Check.HAND_SEEN).outcome)
+        report.observe(Check.HAND_SEEN, true, "40 ms")
+        report.observe(Check.HAND_SEEN, false, "gone")
+        report.set(Check.SPEAKER, false)
+        val text = report.text(listOf("Android 14"))
+        assertTrue(text.contains("PASS    HAND_SEEN - 40 ms"))
+        assertTrue(text.contains("FAIL    SPEAKER"))
+        assertTrue(text.endsWith("Passed 1, failed 1, not run ${Check.entries.size - 2}"))
+        assertEquals(-90.3f, peakDb(ShortArray(4)), 0.1f)
+        assertEquals(0f, peakDb(shortArrayOf(Short.MIN_VALUE)), 0.01f)
+    }
 }

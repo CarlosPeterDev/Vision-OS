@@ -147,28 +147,40 @@ class HandTracker(private val context: Context, wantGpu: Boolean) : ImageAnalysi
         return HandLandmarker.createFromOptions(context, options).also { Log.i("NexusXR", "Hand landmarker ready ($delegate)") }
     }
 
+    /** True when another picture would be used now. */
+    fun wantsFrame(now: Long) = now - lastSubmit >= minIntervalMs && (busySince == 0L || now - busySince >= STALL_MS)
+
     override fun analyze(image: ImageProxy) {
         image.use {
-            val now = SystemClock.uptimeMillis()
-            if (now - lastSubmit < minIntervalMs || (busySince != 0L && now - busySince < STALL_MS)) return
+            if (!wantsFrame(SystemClock.uptimeMillis())) return
             try {
-                val source: Bitmap = it.toBitmap()
-                val degrees = it.imageInfo.rotationDegrees - extraTurns * 90
-                val upright = if (degrees % 360 == 0) source else Bitmap.createBitmap(
-                    source, 0, 0, source.width, source.height, Matrix().apply { postRotate(degrees.toFloat()) }, true
-                )
-                synchronized(this) {
-                    val detector = landmarker ?: return
-                    if (closed) return
-                    aspect = upright.width.toFloat() / upright.height
-                    lastSubmit = now
-                    busySince = now
-                    detector.detectAsync(BitmapImageBuilder(upright).build(), now)
-                }
+                submit(it.toBitmap(), it.imageInfo.rotationDegrees - extraTurns * 90)
             } catch (e: RuntimeException) {
                 error = e.message
                 busySince = 0
             }
+        }
+    }
+
+    /** [degrees] turns [source] clockwise until it is upright. */
+    fun submit(source: Bitmap, degrees: Int) {
+        val now = SystemClock.uptimeMillis()
+        if (!wantsFrame(now)) return
+        try {
+            val upright = if (degrees % 360 == 0) source else Bitmap.createBitmap(
+                source, 0, 0, source.width, source.height, Matrix().apply { postRotate(degrees.toFloat()) }, true
+            )
+            synchronized(this) {
+                val detector = landmarker ?: return
+                if (closed) return
+                aspect = upright.width.toFloat() / upright.height
+                lastSubmit = now
+                busySince = now
+                detector.detectAsync(BitmapImageBuilder(upright).build(), now)
+            }
+        } catch (e: RuntimeException) {
+            error = e.message
+            busySince = 0
         }
     }
 
@@ -186,6 +198,8 @@ class CameraFeed(private val activity: ComponentActivity, private val tracker: H
     private val executor = Executors.newSingleThreadExecutor()
     private var provider: ProcessCameraProvider? = null
     private var analysis: ImageAnalysis? = null
+    /** A start that is still waiting for the camera service is dropped if [stop] comes first. */
+    private var generation = 0
 
     private fun selector(size: Size) = ResolutionSelector.Builder()
         .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
@@ -194,7 +208,9 @@ class CameraFeed(private val activity: ComponentActivity, private val tracker: H
 
     fun start(rotation: Int, surfaces: Preview.SurfaceProvider, onError: (String) -> Unit) {
         val future = ProcessCameraProvider.getInstance(activity)
+        val mine = ++generation
         future.addListener({
+            if (mine != generation) return@addListener
             try {
                 val cameras = future.get()
                 val preview = Preview.Builder().setResolutionSelector(selector(Size(1280, 960)))
@@ -220,7 +236,7 @@ class CameraFeed(private val activity: ComponentActivity, private val tracker: H
     }
 
     fun setRotation(rotation: Int) { analysis?.targetRotation = rotation }
-    fun stop() { provider?.unbindAll(); provider = null; analysis = null }
+    fun stop() { generation++; provider?.unbindAll(); provider = null; analysis = null }
     fun shutdown() { stop(); executor.shutdown() }
 
     /** Vertical field of view of the full 4:3 image in landscape, from the lens data. */

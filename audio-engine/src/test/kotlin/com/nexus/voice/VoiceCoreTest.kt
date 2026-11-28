@@ -249,14 +249,24 @@ class VoiceCoreTest {
     @Test fun engineBargeInStopsSpeechAndModel() = runBlocking {
         val tts = FakeTts(hang = true)
         var modelCancelled = false
-        val engine = VoiceEngine(this, FakeStt(listOf(SttEvent.Final("hi"))), tts, { flow { delay(30); emit(Unit) } }) {
+        val once = object : SttProvider {
+            override val name = "once"
+            var calls = 0
+            override fun listen(language: Language?) = flow<SttEvent> {
+                if (calls++ == 0) emit(SttEvent.Final("hi")) else awaitCancellation()
+            }
+        }
+        val engine = VoiceEngine(this, once, tts, { flow { delay(30); emit(Unit) } }) {
             flow {
                 try { emit("This is a long answer. "); awaitCancellation() } finally { modelCancelled = true }
             }
         }
         engine.start(null)
-        withTimeout(3000) { engine.state.first { it == VoiceState.INTERRUPTED } }
+        // After stopping the reply the engine goes back to listening for what interrupted it.
+        withTimeout(3000) { while (once.calls < 2) delay(5) }
+        assertEquals(VoiceState.LISTENING, engine.state.value)
         assertTrue(tts.stopped && modelCancelled)
+        engine.cancel()
     }
 
     @Test fun engineReportsOffline() = runBlocking {
@@ -264,5 +274,63 @@ class VoiceCoreTest {
         engine.start(null)
         withTimeout(3000) { engine.state.first { it == VoiceState.OFFLINE } }
         assertEquals("down", engine.error.value)
+    }
+
+    private fun scripted(vararg turns: Any) = object : SttProvider {
+        override val name = "script"
+        var calls = 0
+        override fun listen(language: Language?) = flow<SttEvent> {
+            when (val next = turns.getOrNull(calls++) ?: VoiceException(ErrorKind.NO_SPEECH, "quiet")) {
+                is VoiceException -> throw next
+                else -> emit(SttEvent.Final(next as String))
+            }
+        }
+    }
+
+    @Test fun interruptionIsAnsweredEvenOutsideConversationMode() = runBlocking {
+        val asked = mutableListOf<String>()
+        var interrupts = 0
+        val engine = VoiceEngine(
+            this, scripted("first", "second"), FakeTts(),
+            { flow { if (interrupts++ == 0) emit(Unit) else awaitCancellation() } }
+        ) { heard ->
+            asked += heard
+            flow { emit("A long enough answer here. "); if (asked.size == 1) awaitCancellation() }
+        }
+        withTimeout(3000) { engine.start(null).join() }
+        assertEquals(listOf("first", "second"), asked)
+        assertEquals(VoiceState.IDLE, engine.state.value)
+    }
+
+    @Test fun conversationEndsOnGoodbyeOrSilenceWithoutError() = runBlocking {
+        for (ending in listOf<Array<Any>>(arrayOf("hi", "Goodbye!"), arrayOf("hi", "خلاص"), arrayOf("hi"))) {
+            val asked = mutableListOf<String>()
+            val engine = VoiceEngine(this, scripted(*ending), FakeTts(), null) { asked += it; flowOf("Sure thing, here it is.") }
+            withTimeout(3000) { engine.start(null, continuous = true).join() }
+            assertEquals(listOf("hi"), asked)
+            assertEquals(VoiceState.IDLE, engine.state.value)
+            assertNull(engine.error.value)
+        }
+    }
+
+    @Test fun oneSilenceKeepsTheConversationOpen() = runBlocking {
+        val asked = mutableListOf<String>()
+        val engine = VoiceEngine(this, scripted("one", VoiceException(ErrorKind.NO_SPEECH, "q"), "two"), FakeTts(), null) {
+            asked += it; flowOf("Sure thing, here it is.")
+        }
+        withTimeout(3000) { engine.start(null, continuous = true).join() }
+        assertEquals(listOf("one", "two"), asked)
+    }
+
+    @Test fun endPhrasesAreWholeSentencesOnly() {
+        assertTrue(isEndPhrase(" Stop. ")); assertTrue(isEndPhrase("That's all")); assertTrue(isEndPhrase("مع السلامة"))
+        assertFalse(isEndPhrase("stop the video")); assertFalse(isEndPhrase("خلاص افتح الملاحظات"))
+    }
+
+    @Test fun bargeInIgnoresTheReplyItHearsAtTheStartButNotALouderVoice() {
+        val vad = VoiceActivityDetector(VadConfig.bargeIn())
+        // Echo of the reply at about -35 dB, then the user, much louder.
+        assertTrue((1..80).mapNotNull { vad.process(tone(580)) }.isEmpty())
+        assertEquals(listOf(VadEvent.SPEECH_START), (1..20).mapNotNull { vad.process(tone(9000)) })
     }
 }

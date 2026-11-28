@@ -28,6 +28,9 @@
         android:supportsRtl="true"
         android:usesCleartextTraffic="false"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+        <!-- Walk-around tracking is an extra: the app installs and runs on phones without ARCore. -->
+        <meta-data android:name="com.google.ar.core" android:value="optional" />
+
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

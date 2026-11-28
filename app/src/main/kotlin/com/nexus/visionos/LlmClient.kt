@@ -1,6 +1,10 @@
 package com.nexus.visionos
 
+import com.nexus.ai.ChatTurn
+import com.nexus.ai.ConversationMemory
 import com.nexus.ai.OpenAiProtocol
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
@@ -28,13 +32,26 @@ class LlmClient(
 ) {
     val configured get() = settings.llmBaseUrl.isNotBlank() && settings.llmModel.isNotBlank()
 
-    fun reply(userText: String, system: String = OpenAiProtocol.ASSISTANT_PROMPT): Flow<String> {
+    private val memory = ConversationMemory()
+
+    /** Like [reply], but the model also sees the last few turns, including cut-off answers. */
+    fun converse(userText: String): Flow<String> {
+        if (!configured) return reply(userText)
+        val answer = StringBuilder()
+        return reply(userText, history = memory.history())
+            .onEach { answer.append(it) }
+            .onCompletion { memory.add(userText, answer.toString()) }
+    }
+
+    fun reply(
+        userText: String, system: String = OpenAiProtocol.ASSISTANT_PROMPT, history: List<ChatTurn> = emptyList()
+    ): Flow<String> {
         val base = settings.llmBaseUrl
         val model = settings.llmModel
         if (base.isBlank() || model.isBlank()) return flow { emit("${echoPrefix()} $userText") }
         return channelFlow {
             val builder = Request.Builder().url(OpenAiProtocol.endpoint(base))
-                .post(OpenAiProtocol.request(model, userText, system).toRequestBody("application/json".toMediaType()))
+                .post(OpenAiProtocol.request(model, userText, system, history).toRequestBody("application/json".toMediaType()))
             secrets.get(SecretStore.LLM)?.let { builder.header("Authorization", "Bearer $it") }
             client.execute(builder.build()) { response ->
                 if (!response.isSuccessful) throw IOException("AI provider returned HTTP ${response.code}")

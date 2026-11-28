@@ -65,10 +65,12 @@ fun direction(yaw: Float, pitch: Float) = Vec3(sin(yaw) * cos(pitch), sin(pitch)
 data class Ray(val origin: Vec3, val direction: Vec3)
 
 /** Ray through a viewport point. [nx] and [ny] are in [0,1] with the origin at the top left. */
-fun viewportRay(orientation: Quat, nx: Float, ny: Float, fovYDegrees: Float, aspect: Float): Ray {
+fun viewportRay(
+    orientation: Quat, nx: Float, ny: Float, fovYDegrees: Float, aspect: Float, origin: Vec3 = Vec3(0f, 0f, 0f)
+): Ray {
     val t = tan(Math.toRadians(fovYDegrees / 2.0)).toFloat()
     val local = Vec3((nx * 2 - 1) * t * aspect, (1 - ny * 2) * t, -1f).normalized()
-    return Ray(Vec3(0f, 0f, 0f), orientation.rotate(local))
+    return Ray(origin, orientation.rotate(local))
 }
 
 /** Maps a point of an image shown with centre-crop into viewport coordinates. */

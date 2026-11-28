@@ -40,7 +40,7 @@ class VoiceStack(context: Context, scope: CoroutineScope, onFallback: (String, V
         val interrupt: (() -> Flow<Unit>)? =
             if (MicSource.supportsBargeIn) ({ if (settings.bargeIn) mic.bargeIn() else emptyFlow() }) else null
         engine = VoiceEngine(scope, stt, tts, interrupt) { heard ->
-            interceptor?.invoke(heard)?.let { flowOf(it) } ?: llm.reply(heard)
+            interceptor?.invoke(heard)?.let { flowOf(it) } ?: llm.converse(heard)
         }
     }
 

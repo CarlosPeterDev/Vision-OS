@@ -67,22 +67,28 @@ class Scene(
     val messages: List<SceneMessage> = emptyList(),
     val lensZoom: Float = 1f,
     val cursorScale: Float = 1f,
-    val lensGrid: Boolean = false
+    val lensGrid: Boolean = false,
+    /** Set by walk-around tracking, whose camera picture has its own field of view; 0 otherwise. */
+    val trackedFov: Float = 0f
 )
 
-/** Vertical field of view of one eye viewport after centre-cropping the 4:3 passthrough. */
-fun viewFov(scene: Scene, aspect: Float): Float {
-    if (!scene.passthrough) return 62f
-    val crop = if (aspect > 4f / 3f) (4f / 3f) / aspect else 1f
-    return Math.toDegrees(2.0 * kotlin.math.atan(tan(Math.toRadians(scene.cameraFov / 2.0)) * crop)).toFloat()
-}
+/** Vertical field of view of one eye viewport, the same for the camera view and the virtual places. */
+fun viewFov(scene: Scene, aspect: Float): Float =
+    if (scene.trackedFov > 0f) scene.trackedFov else croppedFov(scene.cameraFov, aspect)
 
 class XrRenderer(
     private val view: GLSurfaceView,
-    private val head: () -> Quat,
+    private val head: () -> Pose6,
     private val postToMain: (() -> Unit) -> Unit
 ) : GLSurfaceView.Renderer {
     @Volatile var scene = Scene()
+    /** While set, ARCore supplies the camera picture and the head position. */
+    @Volatile var walk: WalkTracking? = null
+    @Volatile var displayRotation = 1
+    private var walkTexture = 0
+    private var walkPicture = false
+    /** Where the head is in this frame. */
+    private var headAt = Vec3(0f, 0f, 0f)
     @Volatile var lastCameraFrameMs = 0L
         private set
     /** Frames drawn since the camera last delivered one. */
@@ -222,6 +228,8 @@ class XrRenderer(
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         encoder = null
         // A new context: every old GL object is already gone.
+        walkTexture = 0
+        walkPicture = false
         titles.clear()
         icons.clear()
         labels.clear()
@@ -297,7 +305,6 @@ class XrRenderer(
 
     override fun onDrawFrame(gl: GL10?) {
         val s = scene
-        val q = head()
         countFrame()
         framesWithoutCamera++
         slots.values.forEach { it.external?.latch() }
@@ -316,6 +323,11 @@ class XrRenderer(
         val eyeWidth = rects?.get(0)?.width ?: width
         val eyeHeight = rects?.get(0)?.height ?: height
         val aspect = eyeWidth.toFloat() / eyeHeight
+        updateWalk(eyeWidth, eyeHeight)
+        // Read after the walk update, so the windows match the picture behind them.
+        val pose = head()
+        val q = pose.orientation
+        headAt = pose.position
         val blurred = renderBlur(s, q, aspect, eyeWidth, eyeHeight)
 
         if (rects == null) {
@@ -347,6 +359,29 @@ class XrRenderer(
         capture()
     }
 
+    private fun updateWalk(eyeWidth: Int, eyeHeight: Int) {
+        val tracking = walk
+        if (tracking == null) {
+            walkPicture = false
+            return
+        }
+        if (walkTexture == 0) {
+            val id = IntArray(1)
+            glGenTextures(1, id, 0)
+            glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, id[0])
+            parameters(GLES11Ext.GL_TEXTURE_EXTERNAL_OES)
+            walkTexture = id[0]
+        }
+        if (tracking.update(walkTexture, displayRotation, eyeWidth, eyeHeight)) {
+            if (!walkPicture) Log.i("NexusXR", "First camera frame")
+            walkPicture = true
+            lastCameraFrameMs = android.os.SystemClock.uptimeMillis()
+            framesWithoutCamera = 0
+        }
+    }
+
+    private val hasCameraPicture get() = if (walk != null) walkPicture else camera?.hasFrame == true
+
     private fun capture() {
         photoRequest.getAndSet(null)?.let { result ->
             glBindFramebuffer(GL_FRAMEBUFFER, 0)
@@ -371,9 +406,8 @@ class XrRenderer(
 
     private fun background(s: Scene, q: Quat, aspect: Float) {
         glDisable(GL_BLEND)
-        val cam = camera
-        if (s.passthrough && cam?.hasFrame == true) {
-            bindCameraProgram(cam, s, aspect)
+        if (s.passthrough && hasCameraPicture) {
+            bindCameraProgram(s, aspect)
             fullScreen(cameraProgram)
         } else {
             skyProgram.use()
@@ -396,8 +430,18 @@ class XrRenderer(
         }
     }
 
-    private fun bindCameraProgram(cam: External, s: Scene, aspect: Float) {
+    private fun bindCameraProgram(s: Scene, aspect: Float) {
         cameraProgram.use()
+        val matrix = walk?.textureMatrix
+        if (walk != null && matrix != null) {
+            // ARCore's matrix already holds the crop and the turn.
+            cameraProgram.texture("uTexture", walkTexture, GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0)
+            cameraProgram.matrix("uTransform", matrix)
+            cameraProgram.set("uCrop", 1f, 1f)
+            cameraProgram.set("uTurns", 0)
+            return
+        }
+        val cam = camera ?: return
         cameraProgram.texture("uTexture", cam.texture, GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0)
         cameraProgram.matrix("uTransform", cam.matrix)
         val crop = if (aspect > 4f / 3f) floatArrayOf(1f, (4f / 3f) / aspect) else floatArrayOf(aspect / (4f / 3f), 1f)
@@ -447,16 +491,19 @@ class XrRenderer(
         }
         rotation[15] = 1f
         val view = FloatArray(16).also { Matrix.setIdentityM(it, 0); Matrix.translateM(it, 0, -eyeOffset, 0f, 0f) }
-        val viewRotated = FloatArray(16).also { Matrix.multiplyMM(it, 0, view, 0, rotation, 0) }
+        val viewRotated = FloatArray(16).also {
+            Matrix.multiplyMM(it, 0, view, 0, rotation, 0)
+            Matrix.translateM(it, 0, -headAt.x, -headAt.y, -headAt.z)
+        }
         val projection = FloatArray(16).also { Matrix.perspectiveM(it, 0, viewFov(s, aspect), aspect, 0.05f, 20f) }
         Matrix.multiplyMM(viewProjection, 0, projection, 0, viewRotated, 0)
 
         glEnable(GL_BLEND)
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA) // premultiplied alpha everywhere
         // Far to near; the list order (focus) breaks ties.
-        for (win in s.windows.sortedByDescending { it.distance }) drawWindow(s, win, w, h, blurred)
+        for (win in s.windows.sortedByDescending { (it.center - headAt).length }) drawWindow(s, win, w, h, blurred)
 
-        if (s.occlusion && s.passthrough && camera?.hasFrame == true) drawHandOcclusion(s, aspect)
+        if (s.occlusion && s.passthrough && hasCameraPicture) drawHandOcclusion(s, aspect)
         glEnable(GL_BLEND)
         drawHands(s)
 
@@ -468,7 +515,7 @@ class XrRenderer(
             val p = cursor.position
             val right = q.rotate(Vec3(1f, 0f, 0f))
             val up = q.rotate(Vec3(0f, 1f, 0f))
-            val size = p.length * s.cursorScale * if (cursor.pinched) 0.017f else 0.024f
+            val size = (p - headAt).length * s.cursorScale * if (cursor.pinched) 0.017f else 0.024f
             ringProgram.use()
             ringProgram.set("uFill", if (cursor.pinched) 1f else 0f)
             ringProgram.set("uProgress", cursor.progress)
@@ -498,7 +545,7 @@ class XrRenderer(
             val halfW = label.width * metresPerPixel / 2
             val halfH = label.height * metresPerPixel / 2
             val y = message.height * halfHeight
-            fun corner(x: Float, dy: Float) = q.rotate(Vec3(x, y + dy, -distance))
+            fun corner(x: Float, dy: Float) = headAt + q.rotate(Vec3(x, y + dy, -distance))
             textureProgram.use()
             textureProgram.texture("uTexture", label.texture, GL_TEXTURE_2D, 0)
             textureProgram.set("uAlpha", 1f)
@@ -643,9 +690,8 @@ class XrRenderer(
             for ((a, b, c) in PALM) { vertex(x(a), y(a)); vertex(x(b), y(b)); vertex(x(c), y(c)) }
         }
         if (count == 0) return
-        val cam = camera ?: return
         glDisable(GL_BLEND)
-        bindCameraProgram(cam, s, aspect)
+        bindCameraProgram(s, aspect)
         hull.flip()
         val position = cameraProgram.attribute("aPosition")
         glVertexAttribPointer(position, 2, GL_FLOAT, false, 0, hull)

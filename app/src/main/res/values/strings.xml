@@ -412,4 +412,43 @@
     <string name="event_time_passed">That time has already passed, so there will be no reminder. The event is saved in the calendar.</string>
     <string-array name="pose_names"><item>Two fingers (V)</item><item>Three fingers</item><item>Thumbs up</item><item>First and little finger</item><item>Thumb and little finger</item></string-array>
     <string-array name="pose_actions"><item>Off</item><item>Keyboard</item><item>Take photo</item><item>Arrange windows</item><item>Recentre</item><item>Voice control</item><item>Next place</item><item>Close window</item><item>Scroll down</item><item>Scroll up</item><item>Back</item><item>Play video</item><item>Pause video</item><item>Headset view</item></string-array>
+    <string name="six_dof">6DoF: position and direction</string>
+    <string name="walk_mode">Walk mode (6DoF)</string>
+    <string name="heat_adapt">Ease off when hot</string>
+    <string name="heat_easing">hot, doing less</string>
+    <string name="heat_warning">The phone is very hot. Effects are reduced. A short break out of the headset will cool it.</string>
+    <string name="walk_unsupported">Walk mode is not available: this phone does not support ARCore, or Google Play Services for AR is missing. Turning only.</string>
+    <string name="walk_failed">Walk mode could not start the camera. Turning only.</string>
+    <string name="walk_safety">Walk mode: walk only in a clear space and watch your step. Windows stay where you leave them.</string>
+    <string name="walk_dark">Walk mode: more light is needed</string>
+    <string name="walk_plain">Walk mode: look at things with detail, not a plain wall</string>
+    <string name="walk_fast">Walk mode: move more slowly</string>
+    <string name="walk_looking">Walk mode: move the phone slowly to find your position</string>
+    <string name="conversation_mode">Conversation</string>
+    <string name="test_title">Test on this phone</string>
+    <string name="test_help">Open this on your real phone. Show your hand and pinch. Answer Yes or No where asked, then share the report.</string>
+    <string name="test_yes">Yes</string>
+    <string name="test_no">No</string>
+    <string name="test_show_hands">Show hand outline</string>
+    <string name="test_mic_run">Test microphone: speak for 4 seconds</string>
+    <string name="test_sound_play">Play test sound</string>
+    <string name="test_speech_run">Test speech: say a short sentence</string>
+    <string name="test_open_assistant">Open assistant to try interrupting</string>
+    <string name="test_walk_off">turn on Walk mode in Settings, then walk one step</string>
+    <string name="test_summary">Passed %1$d · failed %2$d · not run %3$d</string>
+    <string name="test_share">Share report</string>
+    <string-array name="test_checks">
+        <item>Camera sends pictures</item>
+        <item>Is the camera view upright and does it match what you see?</item>
+        <item>Motion sensor</item>
+        <item>A hand is seen</item>
+        <item>A pinch is detected</item>
+        <item>Does the outline sit on your hand?</item>
+        <item>Microphone hears you</item>
+        <item>Did you hear the sound?</item>
+        <item>Speech is recognised</item>
+        <item>While it was replying, did it stop only when you spoke?</item>
+        <item>Walk mode tracks a step</item>
+        <item>Heat</item>
+    </string-array>
 </resources>

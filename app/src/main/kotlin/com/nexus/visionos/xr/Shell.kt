@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import com.nexus.visionos.R
 import com.nexus.xr.AppType
+import com.nexus.xr.DeviceReport
 import com.nexus.xr.Routine
 import com.nexus.xr.Space
 import com.nexus.xr.Subtitles
@@ -17,6 +18,14 @@ class Stats {
     var resizes = 0
     var palms = 0
 }
+
+/** What the phone is doing right now, for the on-phone test. */
+class DeviceSample(
+    /** Time since the last camera picture; null before the first one. */
+    val cameraAgeMs: Long?, val motion: Boolean, val hands: Int, val handDelayMs: Long, val pinching: Boolean,
+    val walkOn: Boolean, val walking: Boolean, val walkedMetres: Float, val thermalStatus: Int, val fps: Int,
+    val canInterrupt: Boolean
+)
 
 /** What built-in apps may ask of the spatial shell. */
 interface Shell {
@@ -93,6 +102,14 @@ interface Shell {
     /** What the hand tracker sees right now, for the practice window. */
     fun trackingSample(): TrackingSample
     fun measurements(): Measurements
+    val deviceReport: DeviceReport
+    fun deviceSample(): DeviceSample
+    /** Lines about this phone and app for the test report. */
+    fun reportHeader(): List<String>
+    /** Listens for a few seconds. The first value is null when the test could not run. */
+    fun testMicrophone(done: (Boolean?, String) -> Unit)
+    fun testSpeech(done: (Boolean?, String) -> Unit)
+    fun playTestSound()
     /** Opens the phone's share sheet; nothing is sent unless the user picks where. */
     fun shareText(text: String)
     fun exit()

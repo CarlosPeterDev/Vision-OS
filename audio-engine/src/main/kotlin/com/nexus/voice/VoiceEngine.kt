@@ -27,16 +27,24 @@ class VoiceEngine(
 
     private var job: Job? = null
 
-    /** Starts one turn; in [continuous] mode it listens again after each reply. */
+    private enum class Turn { REPLIED, INTERRUPTED, ENDED }
+
+    /**
+     * Starts one turn; in [continuous] mode it listens again after each reply, until the user says
+     * goodbye or stays silent. Talking over a reply always opens a new turn, so the words that
+     * interrupted it are answered.
+     */
     fun start(language: Language?, continuous: Boolean = false): Job {
         val previous = job
         previous?.cancel()
         tts.stop()
         return scope.launch {
             previous?.join() // the microphone must be released before reopening it
+            var followUp = false
             do {
-                val keepGoing = turn(language)
-            } while (continuous && keepGoing)
+                val result = turn(language, followUp, continuous)
+                followUp = true
+            } while (result == Turn.INTERRUPTED || continuous && result == Turn.REPLIED)
         }.also { job = it }
     }
 
@@ -47,33 +55,52 @@ class VoiceEngine(
         _state.value = VoiceState.IDLE
     }
 
-    private suspend fun turn(language: Language?): Boolean {
+    /** In a follow-up, one more try after silence, then the conversation ends quietly. */
+    private suspend fun listen(language: Language?, followUp: Boolean): String {
+        var silences = 0
+        while (true) {
+            try {
+                var heard = ""
+                stt.listen(language).collect {
+                    when (it) {
+                        is SttEvent.Partial -> _transcript.value = it.text
+                        is SttEvent.Final -> { heard = it.text; _transcript.value = it.text }
+                    }
+                }
+                return heard
+            } catch (e: VoiceException) {
+                if (!followUp || e.kind != ErrorKind.NO_SPEECH) throw e
+                if (++silences >= 2) return ""
+            }
+        }
+    }
+
+    private suspend fun turn(language: Language?, followUp: Boolean, conversation: Boolean): Turn {
         _error.value = null
-        _reply.value = ""
-        _transcript.value = ""
+        // In a follow-up the last words stay up until new ones arrive.
+        if (!followUp) { _reply.value = ""; _transcript.value = "" }
         try {
             _state.value = VoiceState.LISTENING
-            var heard = ""
-            stt.listen(language).collect {
-                when (it) {
-                    is SttEvent.Partial -> _transcript.value = it.text
-                    is SttEvent.Final -> { heard = it.text; _transcript.value = it.text }
-                }
+            val heard = listen(language, followUp)
+            if (heard.isBlank() || (followUp || conversation) && isEndPhrase(heard)) {
+                _state.value = VoiceState.IDLE
+                return Turn.ENDED
             }
-            if (heard.isBlank()) { _state.value = VoiceState.IDLE; return false }
+            _reply.value = ""
             _state.value = VoiceState.PROCESSING
-            if (speakReply(respond(heard), language)) {
+            return if (speakReply(respond(heard), language)) {
                 _state.value = VoiceState.INTERRUPTED
+                Turn.INTERRUPTED
             } else {
                 _state.value = VoiceState.IDLE
+                Turn.REPLIED
             }
-            return true
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             _error.value = e.message ?: e.javaClass.simpleName
             _state.value = if ((e as? VoiceException)?.kind == ErrorKind.NETWORK) VoiceState.OFFLINE else VoiceState.ERROR
-            return false
+            return Turn.ENDED
         }
     }
 
@@ -117,3 +144,12 @@ class VoiceEngine(
         interrupted
     }
 }
+
+private val END_PHRASES = setOf(
+    "stop", "stop talking", "bye", "bye bye", "goodbye", "good bye", "thats all", "that is all", "end conversation", "stop listening", "بطل تسمع",
+    "خلاص", "خلاص كده", "كفايه", "كفاية", "بس خلاص", "سلام", "مع السلامه", "مع السلامة", "باي", "اسكت"
+)
+
+/** A whole sentence that ends a conversation, in English or Arabic. */
+fun isEndPhrase(sentence: String): Boolean =
+    sentence.lowercase().filter { it.isLetter() || it == ' ' }.trim().replace(Regex(" +"), " ") in END_PHRASES

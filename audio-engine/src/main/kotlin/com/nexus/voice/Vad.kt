@@ -10,11 +10,13 @@ data class VadConfig(
     val minLevelDb: Double = -45.0,
     val marginDb: Double = 10.0,
     val attackMs: Int = 100,
-    val releaseMs: Int = 700
+    val releaseMs: Int = 700,
+    /** At the start, the level is only measured, to learn how much of the reply the microphone hears. */
+    val calibrateMs: Int = 0
 ) {
     companion object {
         /** Stricter settings while the assistant is speaking, to resist leftover echo. */
-        fun bargeIn() = VadConfig(minLevelDb = -35.0, marginDb = 15.0, attackMs = 240)
+        fun bargeIn() = VadConfig(minLevelDb = -35.0, marginDb = 12.0, attackMs = 240, calibrateMs = 300)
     }
 }
 
@@ -28,6 +30,7 @@ class VoiceActivityDetector(private val config: VadConfig = VadConfig()) {
     private var floorDb = -60.0
     private var loudMs = 0.0
     private var quietMs = 0.0
+    private var heardMs = 0.0
 
     fun process(frame: ShortArray): VadEvent? {
         if (frame.isEmpty()) return null
@@ -35,6 +38,12 @@ class VoiceActivityDetector(private val config: VadConfig = VadConfig()) {
         var sum = 0.0
         for (s in frame) { val v = s / 32768.0; sum += v * v }
         val db = 20 * log10(sqrt(sum / frame.size) + 1e-9)
+        if (heardMs < config.calibrateMs) {
+            heardMs += ms
+            // Capped, so that someone already talking cannot push the bar out of reach.
+            floorDb = maxOf(floorDb, db).coerceAtMost(-34.0)
+            return null
+        }
         val threshold = maxOf(config.minLevelDb, floorDb + config.marginDb)
         val loud = db > if (isSpeaking) threshold - 3 else threshold
         if (!loud && !isSpeaking) floorDb = (floorDb * 0.95 + db * 0.05).coerceIn(-80.0, -30.0)

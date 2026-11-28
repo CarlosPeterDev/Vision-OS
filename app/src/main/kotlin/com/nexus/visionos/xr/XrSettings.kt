@@ -39,6 +39,12 @@ class XrSettings(context: Context) {
     }
 
     var passthrough by Bool(true)
+    /** ARCore position tracking, so windows stay in place while the user walks. */
+    var walkTracking by Bool(false)
+    /** Does less work as the phone heats up. It never stops the app. */
+    var adaptiveHeat by Bool(true)
+    /** The assistant keeps listening after each reply until the user says goodbye. */
+    var conversation by Bool(true)
     /** 0 flat tint, 1 frosted, 2 frosted with colour fringes. */
     var quality by Number(1, 0..2)
     /** Virtual place; see [Places]. */

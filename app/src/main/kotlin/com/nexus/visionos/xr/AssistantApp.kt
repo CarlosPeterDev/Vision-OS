@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
 
 /** The Nexus orb. Its colour and size follow the real engine state. */
 fun assistantApp(
-    context: Context, scope: CoroutineScope, stack: VoiceStack, notice: () -> String, talk: () -> Unit
+    context: Context, scope: CoroutineScope, stack: VoiceStack, settings: XrSettings, notice: () -> String, talk: () -> Unit
 ): SpatialApp {
     val density = context.resources.displayMetrics.density
     fun px(v: Int) = (v * density).toInt()
@@ -41,6 +41,17 @@ fun assistantApp(
         addView(LinearLayout(context).apply {
             addView(button(R.string.talk, talk), LinearLayout.LayoutParams(0, -2, 1f))
             addView(button(R.string.stop) { stack.engine.cancel() }, LinearLayout.LayoutParams(0, -2, 1f))
+            val mode = button(R.string.talk) {}
+            fun name() = context.getString(R.string.conversation_mode) + ": " +
+                context.getString(if (settings.conversation) R.string.on else R.string.off)
+            mode.text = name()
+            mode.setOnClickListener {
+                settings.conversation = !settings.conversation
+                // The running session was started in the other mode.
+                stack.engine.cancel()
+                mode.text = name()
+            }
+            addView(mode, LinearLayout.LayoutParams(0, -2, 1.4f))
         })
     }
     val engine = stack.engine

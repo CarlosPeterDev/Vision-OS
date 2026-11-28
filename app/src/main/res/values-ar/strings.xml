@@ -412,4 +412,43 @@
     <string name="event_time_passed">الوقت ده عدّى خلاص، فمش هيجيلك تذكير. الموعد اتحفظ في التقويم.</string>
     <string-array name="pose_names"><item>صباعين (V)</item><item>تلات صوابع</item><item>الإبهام لفوق</item><item>السبابة والخنصر</item><item>الإبهام والخنصر</item></string-array>
     <string-array name="pose_actions"><item>مقفول</item><item>الكيبورد</item><item>تصوير صورة</item><item>ترتيب النوافذ</item><item>توسيط</item><item>التحكم بالصوت</item><item>المكان التالي</item><item>قفل النافذة</item><item>لف لتحت</item><item>لف لفوق</item><item>رجوع</item><item>تشغيل الفيديو</item><item>إيقاف الفيديو</item><item>وضع النظارة</item></string-array>
+    <string name="six_dof">6DoF: الموقع والاتجاه</string>
+    <string name="walk_mode">وضع المشي (6DoF)</string>
+    <string name="heat_adapt">تخفيف عند السخونة</string>
+    <string name="heat_easing">سخن، بيشتغل أخف</string>
+    <string name="heat_warning">الموبايل سخن جدًا. المؤثرات اتقللت. استراحة قصيرة برة النضارة هتبرده.</string>
+    <string name="walk_unsupported">وضع المشي مش متاح: الموبايل لا يدعم ARCore أو خدمة Google Play للواقع المعزز غير موجودة. هيتتبع الدوران فقط.</string>
+    <string name="walk_failed">وضع المشي ماقدرش يشغل الكاميرا. هيتتبع الدوران فقط.</string>
+    <string name="walk_safety">وضع المشي: امشي في مكان فاضي وخلي بالك من خطواتك. النوافذ بتفضل مكانها.</string>
+    <string name="walk_dark">وضع المشي: محتاج نور أكتر</string>
+    <string name="walk_plain">وضع المشي: بص على حاجات فيها تفاصيل مش حيطة سادة</string>
+    <string name="walk_fast">وضع المشي: اتحرك أبطأ</string>
+    <string name="walk_looking">وضع المشي: حرك الموبايل ببطء علشان يحدد مكانك</string>
+    <string name="conversation_mode">محادثة</string>
+    <string name="test_title">اختبار على الموبايل ده</string>
+    <string name="test_help">افتحه على موبايلك الحقيقي. ورّي إيدك واعمل قرصة بصوابعك. جاوب نعم أو لا، وبعدها ابعت التقرير.</string>
+    <string name="test_yes">نعم</string>
+    <string name="test_no">لا</string>
+    <string name="test_show_hands">إظهار رسم اليد</string>
+    <string name="test_mic_run">اختبار الميكروفون: اتكلم ٤ ثواني</string>
+    <string name="test_sound_play">تشغيل صوت تجربة</string>
+    <string name="test_speech_run">اختبار التعرف على الكلام: قول جملة قصيرة</string>
+    <string name="test_open_assistant">افتح المساعد وجرب تقاطعه</string>
+    <string name="test_walk_off">شغل وضع المشي من الإعدادات وامشي خطوة</string>
+    <string name="test_summary">نجح %1$d · فشل %2$d · لم يُختبر %3$d</string>
+    <string name="test_share">مشاركة التقرير</string>
+    <string-array name="test_checks">
+        <item>الكاميرا بتبعت صور</item>
+        <item>صورة الكاميرا معدولة ومطابقة للي قدامك؟</item>
+        <item>حساس الحركة</item>
+        <item>اليد ظاهرة</item>
+        <item>القرصة اتعرفت</item>
+        <item>رسم اليد راكب على إيدك؟</item>
+        <item>الميكروفون سامعك</item>
+        <item>سمعت الصوت؟</item>
+        <item>التعرف على الكلام</item>
+        <item>وهو بيرد، وقف بس لما اتكلمت؟</item>
+        <item>وضع المشي تتبع خطوة</item>
+        <item>الحرارة</item>
+    </string-array>
 </resources>

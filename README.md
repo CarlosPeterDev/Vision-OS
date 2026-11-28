@@ -44,6 +44,16 @@ Download the APK from the latest [release](../../releases). It needs Android 10 
   closed (Android may be a few minutes late). An event can be copied to the phone's calendar.
 - **Player:** several files as a playlist, SRT/VTT subtitle files with timing adjustment, and a
   large or very large curved screen.
+- **Walk mode (6DoF, optional):** with Google's ARCore, windows stay in place while you walk. Turn it
+  on in Controls or say "walk mode on". It needs an ARCore phone and Google Play Services for AR (free).
+  When tracking is lost the view keeps turning with the motion sensor. Uses more battery and heat.
+- **Heat:** follows Android's thermal status and does less work as the phone warms (lighter glass,
+  slower hand tracking, 30 FPS when very hot). It never stops the app and can be turned off.
+- **Conversation:** the assistant keeps listening after each reply until you say "bye" / "خلاص" or stay
+  silent. Talking over a reply stops it and your words are answered. A configured AI model also gets
+  the last few turns.
+- **Phone test:** Speed check > Test on this phone: camera, hand signals, microphone, speaker, speech,
+  interruption, walk mode and heat, with a report you can share.
 - **Places:** dusk, night, mountains, ocean, cinema hall, deep space, beach, or your own 360° photo.
 - **3D interface sound** (left/right, needs headphones) and an opening animation.
 - **Headset screen fit:** move each eye's picture on its own, change the gap, width and height with
@@ -80,6 +90,12 @@ physical phone.**
 | Website sign-in persistence, file import, PDF viewer, downloads, weather | **Not tested** |
 | GPU hand tracking (off by default, falls back to CPU after a crash) | **Not tested** |
 | Release signing with your key | **Not tested** until the secrets are added |
+| Same window size in camera view and virtual places | Unit test and emulator screenshots |
+| Walk mode maths (pose joining, rays after walking, picture conversion) | Unit tests with made-up input |
+| Walk mode with real ARCore | **Not tested**; the emulator only checks that asking for it does not crash |
+| Heat steps | Unit tests; **not tested** on a hot phone |
+| Conversation and interruption logic | Unit tests with fake audio; **not tested** with a real microphone |
+| Phone test window | Builds and opens; its tests were **not run** on a phone |
 | Screen fit by voice, messages drawn in both eyes | Emulator screenshot |
 | Moving screens by finger drag | **Not tested** |
 | Example voice shortcut, study space, spoken 1-minute reminder, new places | Emulator |
@@ -90,7 +106,7 @@ physical phone.**
 | Headset optics and comfort | **Not tested**; experimental, seated use only |
 
 ## Limits
-Head tracking is rotation only (no walking around; ARCore position tracking is not built). No eye
+Without walk mode, head tracking is rotation only. Walk mode has no obstacle warnings. No eye
 tracking, no true stereo passthrough and no real depth from one camera. Offline recognition depends on your phone: normally Android 12 or
 newer with the language pack installed. With "Offline only" off, the phone's speech service may
 use the internet; the listening badge shows which service is in use.
@@ -116,6 +132,7 @@ The release then has a signed APK and AAB. Keep a private backup of the key. Nev
 7. Home > Screen fit > Drag with finger: line up both pictures, double tap, then put the phone in
    the headset and fine tune with the buttons. Check that messages look single and sharp.
 8. Covering or losing the camera shows a stop warning, not a frozen picture.
+9. Run Speed check > Test on this phone and share the report.
 
 ## Modules
 - `xr-engine`: pure Kotlin math, windows, gestures, commands and small app logic.

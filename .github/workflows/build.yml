@@ -32,7 +32,15 @@ jobs:
         run: |
           if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
             echo "$KEYSTORE_BASE64" | tr -d ' \r\n' | base64 -d > "$RUNNER_TEMP/nexus.jks"
+            # Fails here, with a clear reason, rather than deep inside the Gradle build.
+            if ! keytool -list -keystore "$RUNNER_TEMP/nexus.jks" -storepass:env KEYSTORE_PASSWORD -alias nexus > /dev/null; then
+              echo "::error::The signing secrets do not open a key named 'nexus'. Check NEXUS_KEYSTORE_BASE64 and NEXUS_KEYSTORE_PASSWORD."
+              exit 1
+            fi
             echo "NEXUS_KEYSTORE_FILE=$RUNNER_TEMP/nexus.jks" >> "$GITHUB_ENV"
+          elif [ -n "$KEYSTORE_BASE64$KEYSTORE_PASSWORD" ]; then
+            echo "::error::Only one of the two signing secrets is set. Add both, or remove both."
+            exit 1
           fi
       - name: Build APK
         env:
@@ -56,7 +64,10 @@ jobs:
             cp app/build/outputs/apk/debug/app-debug.apk "$apk"
             echo "Debug-signed with a one-time key. Uninstall the earlier build first; this deletes app data." > dist/SIGNING.txt
           fi
-          "$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner" verify "$apk"
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
+          "$apksigner" verify "$apk"
+          # The fingerprint lets anyone check that two releases were signed with the same key.
+          "$apksigner" verify --print-certs "$apk" | grep -m1 'certificate SHA-256' >> dist/SIGNING.txt
           (cd dist && find . -maxdepth 1 \( -name '*.apk' -o -name '*.aab' \) -exec sha256sum {} + > SHA256SUMS.txt)
           rm -f "$RUNNER_TEMP/nexus.jks"
       - uses: actions/upload-artifact@v4

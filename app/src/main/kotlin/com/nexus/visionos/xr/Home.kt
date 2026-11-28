@@ -165,6 +165,10 @@ internal fun settingsApp(context: Context, shell: Shell): SpatialApp {
         }
         row(height = context.px(52)) { key(context.getString(R.string.photo_place)) { shell.pickPhotoPlace() } }
         row(height = context.px(56)) {
+            option({ named(R.string.walk_mode, onOff(settings.walkTracking)) }) { settings.walkTracking = !settings.walkTracking }
+            option({ named(R.string.heat_adapt, onOff(settings.adaptiveHeat)) }) { settings.adaptiveHeat = !settings.adaptiveHeat }
+        }
+        row(height = context.px(56)) {
             option({ named(R.string.ctl_hands, onOff(settings.showHands)) }) { settings.showHands = !settings.showHands }
             option({ named(R.string.occlusion, onOff(settings.occlusion)) }) { settings.occlusion = !settings.occlusion }
             option({ context.getString(R.string.cinema) }) { shell.toggleCinema() }

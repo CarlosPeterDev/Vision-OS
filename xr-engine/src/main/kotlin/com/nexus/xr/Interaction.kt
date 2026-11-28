@@ -83,6 +83,10 @@ class InteractionController(private val windows: WindowManager, private val list
         // One pointer per window keeps touch streams well formed.
         if (captures.values.any { it.windowId == hit.windowId }) return
         windows.focus(hit.windowId)
+        // A grabbed window turns to face the viewer, wherever they have walked, then follows the ray.
+        if (hit.region == Region.TITLE || hit.region == Region.GRAB) {
+            windows.get(hit.windowId)?.let { windows.replace(facing(it, ray.origin)) }
+        }
         val win = windows.get(hit.windowId) ?: return
         listener.onPressed(hit.region)
         captures[pointer] = when (hit.region) {
@@ -184,6 +188,19 @@ class InteractionController(private val windows: WindowManager, private val list
     fun cancelAll() {
         retainHovers(emptySet())
         captures.keys.toList().forEach { release(it, rays[it] ?: Ray(Vec3(0f, 0f, 0f), Vec3(0f, 0f, -1f)), true) }
+    }
+
+    /** The same spot in the room, described from [viewer], so dragging circles around that point. */
+    private fun facing(win: SpatialWindow, viewer: Vec3): SpatialWindow {
+        if ((viewer - win.anchor).length < 0.05f) return win
+        val to = win.center - viewer
+        val distance = to.length
+        if (distance < 0.3f) return win
+        val way = to * (1f / distance)
+        return win.copy(
+            anchor = viewer, distance = distance,
+            yaw = atan2(way.x, -way.z), pitch = asin(way.y.coerceIn(-1f, 1f))
+        )
     }
 
     private fun yaw(r: Ray) = atan2(r.direction.x, -r.direction.z)

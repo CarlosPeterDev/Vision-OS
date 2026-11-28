@@ -28,6 +28,8 @@ import android.net.Uri
 import android.opengl.GLSurfaceView
 import android.os.BatteryManager
 import android.os.Bundle
+import android.os.Build
+import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import android.view.Choreographer
@@ -47,7 +49,9 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.nexus.visionos.R
+import com.nexus.visionos.MicSource
 import com.nexus.visionos.VoiceStack
+import kotlinx.coroutines.withTimeoutOrNull
 import com.nexus.visionos.speechAttributes
 import com.nexus.xr.*
 
@@ -71,6 +75,17 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
     private val batteryDrain = BatteryDrain()
     private var measuredAt = 0L
     private val governor = PerformanceGovernor()
+    private val thermal = ThermalPolicy()
+    private var heat = HeatLimits.NONE
+    private var heatCheckedAt = 0L
+    private var heatWarned = false
+    private var renderedAt = 0L
+    private var walking: WalkTracking? = null
+    private var walkAttempts = 0
+    private var walkLostSince = 0L
+    private var walkHintShown = false
+    override val deviceReport = DeviceReport()
+    private var testJob: Job? = null
     private val animator = WindowAnimator()
     override val stats = Stats()
     override val activity: android.app.Activity get() = this
@@ -248,7 +263,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
         gl.setEGLContextClientVersion(3)
         gl.setEGLConfigChooser(RecordableConfigChooser())
         gl.preserveEGLContextOnPause = true
-        renderer = XrRenderer(gl, head::orientation) { action -> runOnUiThread { if (!isDestroyed) action() } }
+        renderer = XrRenderer(gl, ::currentPose) { action -> runOnUiThread { if (!isDestroyed) action() } }
         gl.setRenderer(renderer)
         io.execute {
             Places.load(applicationContext)?.let { picture -> runOnUiThread { renderer.setPhoto(picture) } }
@@ -353,9 +368,9 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
         gestures.reset()
         controller.cancelAll()
         voice.engine.cancel()
+        testJob?.cancel()
         head.stop()
-        camera.stop()
-        cameraRunning = false
+        stopCamera()
         gl.onPause()
         super.onPause()
     }
@@ -364,6 +379,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
         surfaces.values.forEach { it.release() }
         surfaces.clear()
         camera.shutdown()
+        renderer.walk = null
+        walking?.close()
         hands.close()
         voice.shutdown()
         feedback.release()
@@ -380,8 +397,132 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
         cameraRunning = true
         cameraStartedAt = SystemClock.uptimeMillis()
         cameraRotation = rotation
+        if (settings.walkTracking && startWalk()) return
         camera.start(cameraRotation, { renderer.provideCamera(it) }) { halt(getString(R.string.camera_failed, it)) }
     }
+
+    private fun stopCamera() {
+        camera.stop()
+        walking?.pause()
+        cameraRunning = false
+    }
+
+    /** Returns false when walk-around tracking cannot be used, so the ordinary camera should start. */
+    private fun startWalk(): Boolean {
+        val tracking = walking ?: WalkTracking(this, hands, head::orientation).also { walking = it }
+        fun later(millis: Long) {
+            cameraRunning = false
+            gl.postDelayed({
+                if (running && checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
+            }, millis)
+        }
+        fun giveUp(reason: Int): Boolean {
+            walkAttempts = 0
+            settings.walkTracking = false
+            dropWalk()
+            say(getString(reason), 8000)
+            Log.w("NexusXR", "Walk tracking unavailable")
+            return false
+        }
+        when (tracking.support()) {
+            WalkTracking.Support.UNSUPPORTED -> return giveUp(R.string.walk_unsupported)
+            WalkTracking.Support.CHECKING -> {
+                if (++walkAttempts > 20) return giveUp(R.string.walk_unsupported)
+                later(300)
+                return true
+            }
+            // Google's installer opens; the camera starts again when spatial mode comes back.
+            WalkTracking.Support.INSTALLING -> { cameraRunning = false; return true }
+            WalkTracking.Support.READY -> {}
+        }
+        return try {
+            tracking.resume()
+            walkAttempts = 0
+            renderer.walk = tracking
+            true
+        } catch (e: Exception) {
+            Log.w("NexusXR", "Walk tracking did not start", e)
+            // The ordinary camera can take a moment to let go.
+            if (++walkAttempts > 6) giveUp(R.string.walk_failed) else { later(500); true }
+        }
+    }
+
+    /** Back to turning only. Windows keep their places around the user. */
+    private fun dropWalk() {
+        val tracking = walking ?: return
+        val at = tracking.fusion.pose(head.orientation()).position
+        renderer.walk = null
+        tracking.close()
+        walking = null
+        windows.shift(at * -1f)
+        windows.viewer = Vec3(0f, 0f, 0f)
+        controller.cancelAll()
+    }
+
+    /** Direction and, with walk-around tracking, position. Called from the main and GL threads. */
+    private fun currentPose(): Pose6 {
+        val sensor = head.orientation()
+        return renderer.walk?.fusion?.pose(sensor) ?: Pose6(sensor, Vec3(0f, 0f, 0f))
+    }
+
+    private fun look() = currentPose().orientation
+
+    /** The current direction, and place, become straight ahead. */
+    private fun faceForward() {
+        val tracking = renderer.walk
+        // Once walking works, the motion sensor stays untouched: tracking is lined up with it.
+        if (tracking != null && tracking.everTracked) tracking.fusion.recenter(head.orientation()) else head.recenter()
+        windows.viewer = currentPose().position
+    }
+
+    private fun ray(x: Float, y: Float, fov: Float, aspect: Float): Ray {
+        val pose = currentPose()
+        return viewportRay(pose.orientation, x, y, fov, aspect, pose.position)
+    }
+
+    /** Eases off as the phone heats up. Nothing is stopped. */
+    private fun checkHeat(now: Long) {
+        if (now - heatCheckedAt < 5000) return
+        heatCheckedAt = now
+        val before = thermal.step
+        heat = if (settings.adaptiveHeat) {
+            val power = getSystemService(PowerManager::class.java)
+            val headroom = if (Build.VERSION.SDK_INT >= 30) power.getThermalHeadroom(10) else Float.NaN
+            thermal.update(power.currentThermalStatus, headroom, now)
+        } else {
+            thermal.reset()
+            HeatLimits.NONE
+        }
+        if (thermal.step != before) Log.i("NexusXR", "Heat step ${thermal.step}")
+        if (heat.warn && !heatWarned) say(getString(R.string.heat_warning), 10_000)
+        heatWarned = heat.warn
+        // A capped frame rate is drawn on request.
+        val mode = if (heat.frameIntervalMs > 0) GLSurfaceView.RENDERMODE_WHEN_DIRTY else GLSurfaceView.RENDERMODE_CONTINUOUSLY
+        if (gl.renderMode != mode) gl.renderMode = mode
+    }
+
+    private fun watchWalk(now: Long) {
+        val tracking = renderer.walk ?: return
+        if (tracking.trouble.isEmpty()) {
+            walkLostSince = 0
+            walkHintShown = false
+            return
+        }
+        if (walkLostSince == 0L) walkLostSince = now
+        if (!walkHintShown && now - walkLostSince > 6000) {
+            walkHintShown = true
+            say(walkHint(tracking.trouble), 6000)
+        }
+    }
+
+    private fun walkHint(trouble: String) = getString(
+        when (trouble) {
+            "INSUFFICIENT_LIGHT" -> R.string.walk_dark
+            "INSUFFICIENT_FEATURES" -> R.string.walk_plain
+            "EXCESSIVE_MOTION" -> R.string.walk_fast
+            else -> R.string.walk_looking
+        }
+    )
 
     private fun useVirtual(reason: String) {
         settings.passthrough = false
@@ -409,9 +550,12 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
     private fun resumeFromWarning() {
         halted = null
         warning.visibility = View.GONE
-        camera.stop()
-        cameraRunning = false
+        stopCamera()
         settings.passthrough = false // continue safely; passthrough can be re-enabled later
+        if (settings.walkTracking) {
+            settings.walkTracking = false
+            dropWalk()
+        }
         if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
     }
 
@@ -419,6 +563,11 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
         override fun doFrame(frameTimeNanos: Long) {
             if (!running) return
             step()
+            val now = SystemClock.uptimeMillis()
+            if (heat.frameIntervalMs > 0 && now - renderedAt >= heat.frameIntervalMs) {
+                renderedAt = now
+                gl.requestRender()
+            }
             Choreographer.getInstance().postFrameCallback(this)
         }
     }
@@ -433,8 +582,11 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
             cameraRotation = displayRotation
             camera.setRotation(displayRotation)
         }
+        renderer.displayRotation = displayRotation
+        checkHeat(now)
+        watchWalk(now)
         // A slow phone gets fewer effects.
-        val level = governor.update(renderer.fps, now)
+        val level = maxOf(governor.update(renderer.fps, now), heat.minLevel)
         Motion.level = level
         windows.defaultDistance = settings.windowDistance
         controller.freeResize = settings.freeResize
@@ -447,8 +599,10 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
             loggedLevel = level
             Log.i("NexusXR", "Performance level $level at ${renderer.fps} FPS")
         }
-        hands.minIntervalMs = if (level == PerformanceGovernor.MAX_LEVEL) 55 else 33
-        hands.extraTurns = settings.cameraTurns
+        hands.minIntervalMs = maxOf(if (level == PerformanceGovernor.MAX_LEVEL) 55L else 33L, heat.handIntervalMs)
+        // ARCore reports its own picture's direction.
+        val tracked = renderer.walk
+        hands.extraTurns = if (tracked != null) 0 else settings.cameraTurns
         hands.swapSides = settings.swapHandSides
         val passthrough = settings.passthrough
         val lastFrame = renderer.lastCameraFrameMs
@@ -471,12 +625,14 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
             else -> gl.width.toFloat() / gl.height
         }
         placeWhenSettled(now)
-        val orientation = head.orientation()
-        val quality = minOf(settings.quality, 2 - level)
+        val pose = currentPose()
+        val orientation = pose.orientation
+        windows.viewer = pose.position
+        val quality = minOf(settings.quality, 2 - level, heat.maxQuality)
         val base = Scene(
             stereo = stereo, passthrough = passthrough, quality = quality, ipd = settings.ipd,
             distortion = settings.distortion, cameraTurns = settings.cameraTurns,
-            displayDegrees = displayRotation * 90, cameraFov = cameraFov
+            displayDegrees = displayRotation * 90, cameraFov = cameraFov, trackedFov = tracked?.fovY ?: 0f
         )
         val fov = viewFov(base, aspect)
         viewFovNow = fov
@@ -487,7 +643,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
         val latest = hands.latest
         val fresh = latest != null && now - latest.timeMs < maxOf(300L, latest.latencyMs + 300)
         fun toViewport(p: Point, imageAspect: Float): Point {
-            val (x, y) = coverMap(p.x, p.y, imageAspect, aspect)
+            val (x, y) = tracked?.toView(p.x, p.y) ?: coverMap(p.x, p.y, imageAspect, aspect)
             return Point(x, y)
         }
         val shapes = if (latest != null && fresh) {
@@ -515,7 +671,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
                     val v = toViewport(p.position, latest?.aspect ?: 4f / 3f)
                     val aim = if (settings.lookAndPinch) gaze.position(p.copy(position = v)) else v
                     aims[p.handId] = aim
-                    controller.handle(p.handId, p.phase, viewportRay(orientation, aim.x, aim.y, fov, aspect))
+                    controller.handle(p.handId, p.phase, viewportRay(orientation, aim.x, aim.y, fov, aspect, pose.position))
                 }
                 aims.keys.retainAll(pointers.keys)
             }
@@ -526,13 +682,13 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
             recordingBadge.text = "● REC %02d:%02d".format(seconds / 60, seconds % 60)
         }
 
-        val centreRay = viewportRay(orientation, 0.5f, 0.5f, fov, aspect)
+        val centreRay = viewportRay(orientation, 0.5f, 0.5f, fov, aspect, pose.position)
         // With look-and-pinch the view's centre highlights even before a hand appears.
         val gazing = settings.lookAndPinch && pointers.isEmpty() && halted == null
         if (gazing) controller.handle(GAZE_POINTER, PointerPhase.HOVER, centreRay)
         // The mouse or controller cursor stays for a while after it was last used.
         val airing = settings.airInput && halted == null && (airDown || now < airUntil)
-        val airAim = if (airing) viewportRay(orientation, air.cursor.x, air.cursor.y, fov, aspect) else null
+        val airAim = if (airing) viewportRay(orientation, air.cursor.x, air.cursor.y, fov, aspect, pose.position) else null
         if (airAim != null) controller.handle(AIR_POINTER, if (airDown) PointerPhase.MOVE else PointerPhase.HOVER, airAim)
         controller.retainHovers(
             pointers.keys + (if (gazing) setOf(GAZE_POINTER) else emptySet()) + (if (airing) setOf(AIR_POINTER) else emptySet())
@@ -556,18 +712,19 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
         }
         poseHold.update(shape, now)?.let { runPose(it) }
         // Where a spoken "click" lands: the hand's cursor if there is one, else the middle of the view.
-        aimRay = pointers.keys.firstOrNull()?.let { aims[it] }?.let { viewportRay(orientation, it.x, it.y, fov, aspect) } ?: centreRay
+        aimRay = pointers.keys.firstOrNull()?.let { aims[it] }
+            ?.let { viewportRay(orientation, it.x, it.y, fov, aspect, pose.position) } ?: centreRay
 
         val cursors = pointers.values.map { p ->
             val aim = aims[p.handId] ?: toViewport(p.position, latest?.aspect ?: 4f / 3f)
-            val ray = viewportRay(orientation, aim.x, aim.y, fov, aspect)
+            val ray = viewportRay(orientation, aim.x, aim.y, fov, aspect, pose.position)
             val distance = windows.pick(ray)?.t ?: 1.5f
             val progress = controller.capturedWindow(p.handId)?.let { surfaces[it]?.holdProgress } ?: 0f
-            CursorMark(ray.direction * (distance * 0.98f), controller.isCapturing(p.handId), progress)
+            CursorMark(ray.origin + ray.direction * (distance * 0.98f), controller.isCapturing(p.handId), progress)
         } + (if (gazing) {
-            listOf(CursorMark(centreRay.direction * ((windows.pick(centreRay)?.t ?: 1.5f) * 0.98f), false))
+            listOf(CursorMark(centreRay.origin + centreRay.direction * ((windows.pick(centreRay)?.t ?: 1.5f) * 0.98f), false))
         } else emptyList()) + (if (airAim != null) {
-            listOf(CursorMark(airAim.direction * ((windows.pick(airAim)?.t ?: 1.5f) * 0.98f), airDown))
+            listOf(CursorMark(airAim.origin + airAim.direction * ((windows.pick(airAim)?.t ?: 1.5f) * 0.98f), airDown))
         } else emptyList())
 
         val shown = animator.update(windows.windows, dt, level)
@@ -591,7 +748,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
             messages = headsetMessages(intro),
             stereo = base.stereo, passthrough = base.passthrough, quality = base.quality, ipd = base.ipd,
             distortion = base.distortion, cameraTurns = base.cameraTurns, displayDegrees = base.displayDegrees,
-            cameraFov = base.cameraFov, blank = halted != null
+            cameraFov = base.cameraFov, trackedFov = base.trackedFov, blank = halted != null
         )
     }
 
@@ -625,7 +782,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
         } else if (!wanted && gl.hasPointerCapture()) gl.releasePointerCapture()
     }
 
-    private fun airRay() = viewportRay(head.orientation(), air.cursor.x, air.cursor.y, viewFovNow, viewAspect)
+    private fun airRay() = ray(air.cursor.x, air.cursor.y, viewFovNow, viewAspect)
 
     // Lint mistakes this ordinary Activity method for a library-internal one.
     @SuppressLint("RestrictedApi")
@@ -666,7 +823,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
         act(Act.HIDE_KEYBOARD)
     }
 
-    override fun airHome() = toggleInFront(AppType.HOME, head.orientation())
+    override fun airHome() = toggleInFront(AppType.HOME, look())
 
     override fun airKeyboard() {
         if (windows.find(AppType.KEYBOARD) == null) act(Act.SHOW_KEYBOARD) else act(Act.HIDE_KEYBOARD)
@@ -809,7 +966,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
         if (inView) windows.minimize(existing!!.id)
         else {
             open(app)
-            windows.find(app)?.let { windows.replace(it.copy(yaw = yaw, pitch = pitch, distance = 1.5f)) }
+            windows.find(app)?.let { windows.replace(it.copy(yaw = yaw, pitch = pitch, distance = 1.5f, anchor = windows.viewer)) }
         }
     }
 
@@ -867,7 +1024,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
         traceHead(now)
         if (placed || !head.hasReading) return
         // Restart the still period whenever the view direction moves noticeably.
-        val forward = head.orientation().rotate(Vec3(0f, 0f, -1f))
+        val forward = look().rotate(Vec3(0f, 0f, -1f))
         val reference = stillForward
         if (reference == null || (forward dot reference) < STILL_COS) {
             stillForward = forward
@@ -876,13 +1033,15 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
         val waited = now - resumedAt
         if (waited < SETTLE_MS || now - stillSince < STILL_MS && waited < MAX_SETTLE_MS) return
         placed = true
-        head.recenter()
-        val look = head.orientation()
+        faceForward()
+        val look = look()
         windows.arrange(yawOf(look), pitchOf(look))
         if (settings.restoreLayout) windows.restore(LayoutCodec.decode(settings.layout, yawOf(look), pitchOf(look)))
         startApp?.let { app ->
             windows.open(app, yawOf(look), pitchOf(look))
-            windows.find(app)?.let { windows.replace(it.copy(yaw = yawOf(look), pitch = pitchOf(look), distance = 1.45f)) }
+            windows.find(app)?.let {
+                windows.replace(it.copy(yaw = yawOf(look), pitch = pitchOf(look), distance = 1.45f, anchor = windows.viewer))
+            }
         }
         if (!settings.tutorialSeen && startApp == null) {
             // Opened to the side; Home stays in front.
@@ -903,7 +1062,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
     private fun traceHead(now: Long) {
         if (!head.hasReading || now - resumedAt > 30_000 || now - tracedAt < 3_000) return
         tracedAt = now
-        val look = head.orientation()
+        val look = look()
         Log.i("NexusXR", "Head yaw %.2f pitch %.2f".format(yawOf(look), pitchOf(look)))
     }
 
@@ -948,9 +1107,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
         }
         if (stereo) return
         val aspect = gl.width.toFloat() / gl.height.coerceAtLeast(1)
-        val ray = viewportRay(
-            head.orientation(), event.x / gl.width, event.y / gl.height, viewFov(renderer.scene, aspect), aspect
-        )
+        val ray = ray(event.x / gl.width, event.y / gl.height, viewFov(renderer.scene, aspect), aspect)
         val phase = when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> PointerPhase.DOWN
             MotionEvent.ACTION_MOVE -> PointerPhase.MOVE
@@ -973,7 +1130,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
         voiceNotice = ""
         stopListening()
         dictation?.cancel()
-        voice.engine.start(voice.settings.selectedLanguage).invokeOnCompletion { audio.abandonAudioFocusRequest(audioFocus) }
+        voice.engine.start(voice.settings.selectedLanguage, continuous = settings.conversation)
+            .invokeOnCompletion { audio.abandonAudioFocusRequest(audioFocus) }
     }
 
     // ---- InteractionListener ----
@@ -987,7 +1145,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
 
     /** Where the aimed-at point is, seen from the head: zero ahead, positive to the right. */
     private fun aimAzimuth(): Float {
-        val local = head.orientation().conjugate().rotate(aimRay?.direction ?: return 0f)
+        val local = look().conjugate().rotate(aimRay?.direction ?: return 0f)
         return kotlin.math.atan2(local.x, -local.z)
     }
 
@@ -1007,7 +1165,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
     // ---- Shell ----
 
     override fun open(app: AppType) {
-        val look = head.orientation()
+        val look = look()
         Log.i("NexusXR", "open $app")
         windows.open(app, yawOf(look), pitchOf(look))
     }
@@ -1140,7 +1298,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
     }
 
     override fun saveSpace(space: Space) {
-        val look = head.orientation()
+        val look = look()
         val layout = LayoutCodec.encode(
             windows.windows.filter { it.app != AppType.KEYBOARD && it.app != AppType.SPACES }, yawOf(look), pitchOf(look)
         )
@@ -1155,7 +1313,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
 
     /** Closes what is open and brings back the windows saved in [space], or a starting set. */
     override fun openSpace(space: Space) {
-        val look = head.orientation()
+        val look = look()
         // The assistant stays, so it can finish its reply.
         for (window in windows.windows.filter { it.app != AppType.ASSISTANT }) {
             windows.close(window.id)
@@ -1530,7 +1688,7 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
         }
         // The games use the movement words themselves.
         if (focused?.app == AppType.GAMES && surface?.command(act) == true) return true
-        val look = head.orientation()
+        val look = look()
         when (act) {
             Act.CLOSE_THIS -> {
                 val window = focused ?: return false
@@ -1616,6 +1774,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
             Act.HEADSET_OFF -> stereo = false
             Act.CAMERA_VIEW -> { settings.passthrough = true; settingsChanged() }
             Act.VIRTUAL_VIEW -> { settings.passthrough = false; settingsChanged() }
+            Act.WALK_ON -> { settings.walkTracking = true; settingsChanged() }
+            Act.WALK_OFF -> { settings.walkTracking = false; settingsChanged() }
             Act.NEXT_SCENE -> { settings.scene = Places.next(this, settings.scene); settings.passthrough = false; settingsChanged() }
             Act.START_RECORDING -> { if (recording != null) return false; toggleRecording(); return recording != null }
             Act.STOP_RECORDING -> { if (recording == null) return false; toggleRecording() }
@@ -1625,6 +1785,91 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
             Act.STOP_LISTENING -> { stopListening(); say(getString(R.string.voice_off)) }
         }
         return true
+    }
+
+    // ---- Test on this phone ----
+
+    override fun deviceSample(): DeviceSample {
+        val now = SystemClock.uptimeMillis()
+        val latest = hands.latest?.takeIf { now - it.timeMs < maxOf(500L, it.latencyMs + 500) }
+        val tracked = renderer.walk
+        return DeviceSample(
+            cameraAgeMs = renderer.lastCameraFrameMs.let { if (it == 0L) null else now - it },
+            motion = head.available && head.hasReading,
+            hands = latest?.hands?.size ?: 0,
+            handDelayMs = latest?.latencyMs ?: 0,
+            pinching = pointers.keys.any { controller.isCapturing(it) } || pointers.values.any { it.ratio < settings.pressRatio },
+            walking = tracked?.trouble?.isEmpty() == true,
+            walkedMetres = tracked?.fusion?.distanceFromOrigin() ?: 0f,
+            walkOn = tracked != null,
+            thermalStatus = getSystemService(PowerManager::class.java).currentThermalStatus,
+            fps = renderer.fps,
+            canInterrupt = MicSource.supportsBargeIn
+        )
+    }
+
+    override fun reportHeader() = listOf(
+        "${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
+        "App " + (runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: "?")
+    )
+
+    private fun microphoneReady(): Boolean {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 7)
+            return false
+        }
+        // One user of the microphone at a time.
+        stopListening()
+        dictation?.cancel()
+        voice.engine.cancel()
+        testJob?.cancel()
+        return true
+    }
+
+    override fun testMicrophone(done: (Boolean?, String) -> Unit) {
+        if (!microphoneReady()) return done(null, getString(R.string.mic_denied))
+        testJob = lifecycleScope.launch {
+            var peak = -90f
+            try {
+                withTimeoutOrNull(4000) { MicSource().frames().collect { peak = maxOf(peak, peakDb(it)) } }
+                // A quiet room stays well under this; ordinary speech near the phone is far above it.
+                done(peak > -30f, "loudest %.0f dB".format(peak))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                done(false, e.message ?: e.javaClass.simpleName)
+            }
+        }
+    }
+
+    override fun testSpeech(done: (Boolean?, String) -> Unit) {
+        if (!microphoneReady()) return done(null, getString(R.string.mic_denied))
+        testJob = lifecycleScope.launch {
+            val engine = if (offlineStt.hasOnDevice) "on-device" else "phone service"
+            try {
+                var words = ""
+                withTimeout(15_000) {
+                    offlineStt.listen(voice.settings.selectedLanguage).collect { if (it is SttEvent.Final) words = it.text }
+                }
+                // Only the number of words goes in the report, never what was said.
+                val count = words.split(' ').count { it.isNotBlank() }
+                done(count > 0, "$engine, $count words")
+            } catch (e: TimeoutCancellationException) {
+                done(false, "$engine, no answer in 15 s")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                done(false, "$engine, ${e.message ?: e.javaClass.simpleName}")
+            }
+        }
+    }
+
+    override fun playTestSound() {
+        runCatching {
+            val tone = ToneGenerator(AudioManager.STREAM_MUSIC, 80)
+            tone.startTone(ToneGenerator.TONE_PROP_BEEP2, 1000)
+            gl.postDelayed({ tone.release() }, 1500)
+        }
     }
 
     // ---- Timer and files ----
@@ -1658,18 +1903,25 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
         val latest = hands.latest
         val hand = hands.error?.let { "✗ $it" }
             ?: latest?.let { "${it.hands.size} · ${it.latencyMs} ms" } ?: "…"
-        return "$time · $battery% · ${renderer.fps} FPS\n" +
-            getString(R.string.status_tracking, getString(if (head.available) R.string.three_dof else R.string.no_tracking), hand) +
+        val tracked = renderer.walk
+        val tracking = when {
+            tracked == null -> getString(if (head.available) R.string.three_dof else R.string.no_tracking)
+            tracked.trouble.isEmpty() -> getString(R.string.six_dof)
+            else -> walkHint(tracked.trouble)
+        }
+        val hot = if (thermal.step > 0) " · " + getString(R.string.heat_easing) else ""
+        return "$time · $battery% · ${renderer.fps} FPS$hot\n" +
+            getString(R.string.status_tracking, tracking, hand) +
             (if (voiceNotice.isEmpty()) "" else "\n$voiceNotice")
     }
 
     override fun recenter() {
-        head.recenter()
+        faceForward()
         arrange()
     }
 
     override fun arrange() {
-        val look = head.orientation()
+        val look = look()
         windows.arrange(yawOf(look), pitchOf(look))
     }
 
@@ -1686,8 +1938,10 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
         val target = windows.windows.lastOrNull { it.curved }
             ?: windows.find(AppType.MEDIA) ?: windows.focused?.takeIf { it.app != AppType.HOME }
             ?: run { open(AppType.MEDIA); windows.find(AppType.MEDIA) } ?: return
-        val look = head.orientation()
-        val front = target.copy(curved = true, yaw = yawOf(look), pitch = pitchOf(look), minimized = false)
+        val look = look()
+        val front = target.copy(
+            curved = true, yaw = yawOf(look), pitch = pitchOf(look), minimized = false, anchor = windows.viewer
+        )
         windows.replace(
             when {
                 !target.curved -> front.copy(scale = 1.7f, distance = 2.1f)
@@ -1717,10 +1971,19 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
 
     override fun settingsChanged() {
         cameraStartedAt = SystemClock.uptimeMillis()
+        heatCheckedAt = 0
+        if (running && settings.walkTracking != (walking != null)) {
+            val on = settings.walkTracking
+            stopCamera()
+            walkAttempts = 0
+            if (!on) dropWalk()
+            if (on) say(getString(R.string.walk_safety), 8000)
+            if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
+        }
     }
 
     override fun assistant(context: Context): SpatialApp =
-        assistantApp(context, lifecycleScope, voice, { voiceNotice }) { talk() }
+        assistantApp(context, lifecycleScope, voice, settings, { voiceNotice }) { talk() }
 
     override fun exit() { finish() }
 

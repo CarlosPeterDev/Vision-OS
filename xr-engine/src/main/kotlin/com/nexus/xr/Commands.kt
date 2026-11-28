@@ -85,6 +85,8 @@ enum class Act(val group: String, vararg val phrases: String) {
     CAMERA_VIEW("view", "camera view", "show real world", "اعرض الحقيقه", "وضع الكاميرا"),
     VIRTUAL_VIEW("view", "virtual world", "virtual environment", "العالم الافتراضي"),
     NEXT_SCENE("view", "next scene", "change scene", "غير المنظر"),
+    WALK_ON("view", "walk mode on", "start walk mode", "شغل وضع المشي", "وضع المشي"),
+    WALK_OFF("view", "walk mode off", "stop walk mode", "اقفل وضع المشي", "وقف وضع المشي"),
 
     // Capture and system
     START_RECORDING("system", "start recording", "record video", "ابدا التسجيل", "سجل فيديو"),
