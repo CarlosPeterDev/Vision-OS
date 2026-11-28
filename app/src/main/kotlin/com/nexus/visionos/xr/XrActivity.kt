@@ -311,6 +311,15 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
             setPadding(32, 14, 32, 14)
             visibility = View.GONE
         }
+        // Back leaves a full screen video first; otherwise it does what it always did.
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (surfaces.values.any { it.back() }) return
+                isEnabled = false
+                onBackPressedDispatcher.onBackPressed()
+                isEnabled = true
+            }
+        })
         setContentView(FrameLayout(this).apply {
             addView(gl)
             addView(listeningBadge, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START).apply { bottomMargin = 24; marginStart = 24 })
@@ -704,8 +713,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
         // An open hand turned away shows Home; turned towards the face it opens the quick menu.
         val free = pointers.values.filter { it.openPalm && !controller.isCapturing(it.handId) }
         val shortcuts = settings.palmShortcuts
-        if (palm.update(shortcuts && free.any { !it.palmToUser }, now)) toggleInFront(AppType.HOME, orientation)
-        if (menuPalm.update(shortcuts && free.any { it.palmToUser }, now)) toggleInFront(AppType.CENTER, orientation)
+        if (palm.update(shortcuts && free.any { !it.palmToUser }, now)) { stats.palms++; toggleInFront(AppType.HOME, orientation) }
+        if (menuPalm.update(shortcuts && free.any { it.palmToUser }, now)) { stats.palms++; toggleInFront(AppType.CENTER, orientation) }
         // A still hand shape with an action of its own, held for a second.
         val shape = free.firstNotNullOfOrNull { it.pose }?.takeIf {
             halted == null && calibration == null && settings.poseAction(it) != PoseAction.NOTHING
@@ -727,7 +736,9 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
             listOf(CursorMark(airAim.origin + airAim.direction * ((windows.pick(airAim)?.t ?: 1.5f) * 0.98f), airDown))
         } else emptyList())
 
-        val shown = animator.update(windows.windows, dt, level)
+        val targets = windows.windows
+        val shown = animator.update(targets, dt, level, targets.filter { controller.isHeld(it.id) }.mapTo(HashSet()) { it.id })
+        windows.present(shown.map { it.window })
         syncSurfaces()
         val cinema = shown.any { it.window.curved }
         renderer.scene = Scene(
@@ -955,7 +966,6 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
 
     /** Brings a window in front of the user, or hides it if it is already there. */
     private fun toggleInFront(app: AppType, orientation: Quat) {
-        stats.palms++
         feedback.click()
         val yaw = yawOf(orientation)
         val pitch = pitchOf(orientation)

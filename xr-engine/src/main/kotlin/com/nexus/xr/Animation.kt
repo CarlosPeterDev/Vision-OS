@@ -18,7 +18,10 @@ class Spring(var value: Float, private var velocity: Float = 0f) {
 
 class AnimatedWindow(val window: SpatialWindow, val alpha: Float)
 
-/** Smooths window motion and fades windows in and out. Hit testing keeps using the real targets. */
+/**
+ * Smooths window motion and fades windows in and out. Pass its result to [WindowManager.present] so
+ * input matches what is drawn.
+ */
 class WindowAnimator {
     private class State(var window: SpatialWindow) {
         val yaw = Spring(window.yaw)
@@ -35,7 +38,7 @@ class WindowAnimator {
     fun isVisible(id: Int) = id in states
 
     /** [level] is the [PerformanceGovernor] level: 0 smooth, 1 quick, 2 instant. */
-    fun update(targets: List<SpatialWindow>, dt: Float, level: Int): List<AnimatedWindow> {
+    fun update(targets: List<SpatialWindow>, dt: Float, level: Int, held: Set<Int> = emptySet()): List<AnimatedWindow> {
         val shown = targets.filter { !it.minimized }.associateBy { it.id }
         for ((id, target) in shown) states.getOrPut(id) { State(target) }.window = target
         val omega = if (level == 0) 16f else 34f
@@ -49,7 +52,8 @@ class WindowAnimator {
             val yawTarget = s.yaw.value + atan2(sin(t.yaw - s.yaw.value), cos(t.yaw - s.yaw.value))
             val scaleTarget = if (leaving) t.scale * 0.85f else t.scale
             val alphaTarget = if (leaving) 0f else 1f
-            if (level >= PerformanceGovernor.MAX_LEVEL) {
+            // A window being moved or resized follows the hand without any lag.
+            if (level >= PerformanceGovernor.MAX_LEVEL || id in held) {
                 s.yaw.snap(yawTarget); s.pitch.snap(t.pitch); s.distance.snap(t.distance)
                 s.scale.snap(scaleTarget); s.alpha.snap(alphaTarget)
             } else {
@@ -66,6 +70,8 @@ class WindowAnimator {
                 s.alpha.value.coerceIn(0f, 1f)
             )
         }
-        return result
+        // Closing windows first, then the given focus order, which breaks painting ties.
+        val order = shown.keys.withIndex().associate { it.value to it.index }
+        return result.sortedBy { order[it.window.id] ?: -1 }
     }
 }

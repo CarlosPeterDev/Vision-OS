@@ -13,6 +13,8 @@ import android.widget.ScrollView
 import android.widget.TextView
 import com.nexus.visionos.R
 import com.nexus.xr.AppType
+import com.nexus.xr.Lesson
+import com.nexus.xr.TutorialProgress
 
 private class Entry(val label: String, val icon: Int, val colours: IntArray, val action: () -> Unit)
 
@@ -299,45 +301,54 @@ internal fun settingsApp(context: Context, shell: Shell): SpatialApp {
     return SpatialApp(view, stop)
 }
 
-/** Walks through the gestures; each step completes only when the gesture really happens. */
+/** Walks through the gestures; a lesson is practised only by doing its own action. */
 internal fun tutorial(context: Context, shell: Shell): SpatialApp {
-    var step = 0
-    var mark = 0
+    val progress = TutorialProgress(shell.settings.tutorialMastered)
+    var targetTaps = 0
     lateinit var title: TextView
+    lateinit var target: android.widget.Button
     lateinit var practice: ScrollView
     lateinit var button: android.widget.Button
     val stats = shell.stats
     val steps = context.resources.getStringArray(R.array.tutorial_steps)
-    fun counter() = when (step) {
-        0 -> stats.presses
-        2 -> stats.moves
-        3 -> stats.resizes
-        4 -> stats.palms
-        else -> 0
+    fun counter() = when (progress.current) {
+        Lesson.TAP -> targetTaps
+        // Counts as one action once the list has really been scrolled.
+        Lesson.SCROLL -> if (practice.scrollY > context.px(60)) 1 else 0
+        Lesson.MOVE -> stats.moves
+        Lesson.RESIZE -> stats.resizes
+        Lesson.PALM -> stats.palms
+        null -> 0
     }
     fun show() {
-        title.text = if (step < steps.size) "${step + 1}/${steps.size}  ${steps[step]}" else context.getString(R.string.tutorial_done)
-        practice.visibility = if (step == 1) View.VISIBLE else View.INVISIBLE
+        val lesson = progress.current
+        title.text = if (lesson != null) "${progress.number}/${steps.size}  ${steps[lesson.ordinal]}"
+        else context.getString(R.string.tutorial_summary, progress.practised.size, steps.size)
+        target.visibility = if (lesson == Lesson.TAP) View.VISIBLE else View.GONE
+        practice.visibility = if (lesson == Lesson.SCROLL) View.VISIBLE else View.INVISIBLE
         practice.scrollTo(0, 0)
-        mark = counter()
-        button.setText(if (step < steps.size) R.string.skip_step else R.string.start_over)
+        progress.begin(counter())
+        button.setText(if (lesson != null) R.string.skip_step else R.string.start_over)
     }
     val view = context.vertical {
         title = text(size = 17f)
+        row(height = context.px(56)) { target = key(context.getString(R.string.tutorial_target), tint = 0x5AB0FF) { targetTaps++ } }
         practice = context.scrolling { for (i in 1..30) text("•  $i", 18f) }
         addView(FrameLayout(context).apply { addView(practice) }, LinearLayout.LayoutParams(-1, 0, 1f))
-        button = android.widget.Button(context)
-        removeView(button)
-        row(height = context.px(56)) { button = key("") { step = if (step < steps.size) step + 1 else 0; shell.settings.tutorialSeen = true; show() } }
+        row(height = context.px(56)) {
+            button = key("") {
+                // Having used the tutorial stops it opening by itself; it is not the same as practising.
+                shell.settings.tutorialSeen = true
+                if (progress.current != null) progress.skip() else progress.restart()
+                show()
+            }
+        }
     }
     show()
     val stop = ticker(250) {
-        if (step >= steps.size) return@ticker
-        // The first step is passed by pressing anywhere, including the skip button itself.
-        val done = if (step == 1) practice.scrollY > context.px(60) else counter() > mark
-        if (done) {
-            step++
-            if (step == steps.size) shell.settings.tutorialSeen = true
+        if (progress.observe(counter())) {
+            shell.settings.tutorialMastered = progress.encode()
+            if (progress.current == null) shell.settings.tutorialSeen = true
             show()
         }
     }

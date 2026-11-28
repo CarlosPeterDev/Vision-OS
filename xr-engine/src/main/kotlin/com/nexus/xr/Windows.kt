@@ -135,6 +135,15 @@ fun hitTest(ray: Ray, win: SpatialWindow): Hit? {
 }
 
 /**
+ * The order windows are painted in, farthest first. The renderer has no depth test, so the last
+ * window painted is the one seen where two overlap. Distances are compared in whole centimetres, so
+ * windows at the same distance keep the given (focus) order instead of rounding noise deciding.
+ * Drawing and picking both use this.
+ */
+fun paintOrder(windows: List<SpatialWindow>, eye: Vec3): List<SpatialWindow> =
+    windows.sortedByDescending { ((it.center - eye).length * 100f).roundToInt() }
+
+/**
  * Saves window arrangements relative to the viewing direction, so they come back in the same
  * shape wherever the user faces next time.
  */
@@ -182,6 +191,14 @@ class WindowManager(private val maxWindows: Int = 6) {
     val windows: List<SpatialWindow> get() = items.toList()
     val focused: SpatialWindow? get() = items.lastOrNull { !it.minimized && it.app != AppType.KEYBOARD }
     fun get(id: Int) = items.firstOrNull { it.id == id }
+
+    private var presented = emptyMap<Int, SpatialWindow>()
+
+    /** Records the geometry in the frame on screen, which can lag the targets while animating. */
+    fun present(frame: List<SpatialWindow>) { presented = frame.associateBy { it.id } }
+
+    /** [window] where the user currently sees it; a window not drawn yet is at its target. */
+    fun onScreen(window: SpatialWindow) = presented[window.id] ?: window
     fun find(app: AppType) = items.firstOrNull { it.app == app }
 
     /** Opens or restores the single window of [app]. Returns evicted window ids through [onEvict]. */
@@ -255,15 +272,10 @@ class WindowManager(private val maxWindows: Int = 6) {
     fun close(id: Int) { items.removeAll { it.id == id } }
     fun minimize(id: Int) { get(id)?.let { replace(it.copy(minimized = true)) } }
 
-    /** Nearest visible window under the ray. Equal depths go to the one focused last. */
+    /** The window seen under the ray: closing and minimized windows take no input. */
     fun pick(ray: Ray): Hit? {
-        var best: Hit? = null
-        for (w in items.asReversed()) {
-            if (w.minimized) continue
-            val hit = hitTest(ray, w) ?: continue
-            if (best == null || hit.t < best.t - 0.01f) best = hit
-        }
-        return best
+        val shown = items.filter { !it.minimized }.map { onScreen(it) }
+        return paintOrder(shown, ray.origin).asReversed().firstNotNullOfOrNull { hitTest(ray, it) }
     }
 
     /** Lays visible windows side by side around [headYaw]. */

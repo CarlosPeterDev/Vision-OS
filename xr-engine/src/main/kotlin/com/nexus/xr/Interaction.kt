@@ -83,6 +83,13 @@ class InteractionController(private val windows: WindowManager, private val list
         // One pointer per window keeps touch streams well formed.
         if (captures.values.any { it.windowId == hit.windowId }) return
         windows.focus(hit.windowId)
+        // A window grabbed while still animating is picked up where it is seen, so it does not jump.
+        if (hit.region == Region.TITLE || hit.region == Region.GRAB) {
+            windows.get(hit.windowId)?.let {
+                val seen = windows.onScreen(it)
+                windows.replace(it.copy(yaw = seen.yaw, pitch = seen.pitch, distance = seen.distance, anchor = seen.anchor))
+            }
+        }
         // A grabbed window turns to face the viewer, wherever they have walked, then follows the ray.
         if (hit.region == Region.TITLE || hit.region == Region.GRAB) {
             windows.get(hit.windowId)?.let { windows.replace(facing(it, ray.origin)) }
@@ -109,8 +116,9 @@ class InteractionController(private val windows: WindowManager, private val list
         val win = windows.get(capture.windowId) ?: run { captures.remove(pointer); return }
         when (capture) {
             is Content -> {
-                val (_, x, y) = planeHit(ray, win) ?: return
-                val (u, v) = contentCoords(win, x, y)
+                val seen = windows.onScreen(win)
+                val (_, x, y) = planeHit(ray, seen) ?: return
+                val (u, v) = contentCoords(seen, x, y)
                 capture.u = u
                 capture.v = v
                 listener.onContentTouch(win.id, TouchAction.MOVE, u, v)

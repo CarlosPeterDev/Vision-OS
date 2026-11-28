@@ -501,7 +501,7 @@ class XrRenderer(
         glEnable(GL_BLEND)
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA) // premultiplied alpha everywhere
         // Far to near; the list order (focus) breaks ties.
-        for (win in s.windows.sortedByDescending { (it.center - headAt).length }) drawWindow(s, win, w, h, blurred)
+        for (win in paintOrder(s.windows, headAt)) drawWindow(s, win, w, h, blurred)
 
         if (s.occlusion && s.passthrough && hasCameraPicture) drawHandOcclusion(s, aspect)
         glEnable(GL_BLEND)

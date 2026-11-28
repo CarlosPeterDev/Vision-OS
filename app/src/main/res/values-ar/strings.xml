@@ -149,7 +149,9 @@
     <string name="calibrate_failed">المعايرة فشلت. خلي إيدك ظاهرة وحاول تاني</string>
     <string name="skip_step">تخطي</string>
     <string name="start_over">من الأول</string>
-    <string name="tutorial_done">خلصت. لو سيبت قبل ثانيتين تبقى ضغطة عادية. اثبت ثانيتين للضغطة الطويلة.</string>
+    <string name="tutorial_summary">اتمرنت على %1$d من %2$d دروس. الدروس اللي عديتها مش محسوبة. لو سيبت قبل ثانيتين تبقى ضغطة عادية، واثبت ثانيتين للضغطة الطويلة.</string>
+    <string name="tutorial_target">زرار التمرين</string>
+    <string name="exit_fullscreen">خروج من ملء الشاشة</string>
     <string-array name="scenes">
         <item>غروب</item>
         <item>ليل</item>
@@ -176,7 +178,7 @@
         <item>ثابت</item>
     </string-array>
     <string-array name="tutorial_steps">
-        <item>اضم أصابعك على أي مكان في النافذة دي علشان تعمل أول ضغطة.</item>
+        <item>اضم أصابعك على زرار التمرين اللي تحت علشان تعمل أول ضغطة.</item>
         <item>اضم جوه القائمة اللي تحت وحرك إيدك علشان تعمل scroll.</item>
         <item>اضم على الشريط اللي تحت النافذة وحركها.</item>
         <item>اضم على الركن اللي تحت على اليمين واسحب علشان تغير الحجم.</item>

@@ -149,7 +149,9 @@
     <string name="calibrate_failed">Calibration failed. Keep the hand in view and try again</string>
     <string name="skip_step">Skip</string>
     <string name="start_over">Start over</string>
-    <string name="tutorial_done">Done. Releasing within 2 seconds is a tap. Hold still for 2 seconds for a long press.</string>
+    <string name="tutorial_summary">You practised %1$d of %2$d lessons. Skipped lessons are not counted. Releasing within 2 seconds is a tap; hold still for 2 seconds for a long press.</string>
+    <string name="tutorial_target">Practice target</string>
+    <string name="exit_fullscreen">Exit full screen</string>
     <string-array name="scenes">
         <item>Dusk</item>
         <item>Night</item>
@@ -176,7 +178,7 @@
         <item>Steady</item>
     </string-array>
     <string-array name="tutorial_steps">
-        <item>Pinch anywhere on this window to make your first tap.</item>
+        <item>Pinch the Practice target button below to make your first tap.</item>
         <item>Pinch inside the list below and move your hand to scroll it.</item>
         <item>Pinch the bar under a window and move it.</item>
         <item>Pinch the corner at a window’s lower right and drag to resize.</item>

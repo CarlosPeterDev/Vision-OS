@@ -99,6 +99,40 @@ internal fun browser(context: Context, shell: Shell): SpatialApp {
     lateinit var starButton: View
     val web = { tabs[current] }
 
+    // A page's full screen video (HTML fullscreen) covers the browser inside its own window.
+    lateinit var chrome: View
+    val stage = FrameLayout(context).apply { setBackgroundColor(android.graphics.Color.BLACK); visibility = View.GONE }
+    var fullscreen: WebChromeClient.CustomViewCallback? = null
+
+    /** Safe to call at any time. [tellPage] is false when the page itself asked to leave. */
+    fun leaveFullscreen(tellPage: Boolean = true): Boolean {
+        val callback = fullscreen ?: return false
+        // Cleared first: telling the page may call back into onHideCustomView.
+        fullscreen = null
+        stage.removeAllViews()
+        stage.visibility = View.GONE
+        chrome.visibility = View.VISIBLE
+        if (tellPage) callback.onCustomViewHidden()
+        return true
+    }
+
+    fun enterFullscreen(video: View, callback: WebChromeClient.CustomViewCallback) {
+        if (fullscreen != null) return callback.onCustomViewHidden()
+        fullscreen = callback
+        stage.addView(video, FrameLayout.LayoutParams(-1, -1, android.view.Gravity.CENTER))
+        val exit = android.widget.Button(context).apply {
+            text = context.getString(R.string.exit_fullscreen)
+            isAllCaps = false
+            setTextColor(-1)
+            background = glassStates(0xFFFFFF, radius = context.px(18).toFloat())
+            setOnClickListener { leaveFullscreen() }
+        }
+        stage.addView(exit, FrameLayout.LayoutParams(-2, context.px(40), android.view.Gravity.TOP or android.view.Gravity.END))
+        // Kept attached while hidden, so the page and its playback carry on.
+        chrome.visibility = View.INVISIBLE
+        stage.visibility = View.VISIBLE
+    }
+
     fun refreshStar() {
         val saved = bookmarks.contains(web().url.orEmpty())
         starButton.alpha = if (saved) 1f else 0.55f
@@ -108,6 +142,7 @@ internal fun browser(context: Context, shell: Shell): SpatialApp {
     fun go(input: String) {
         val text = input.trim()
         if (text.isEmpty()) return
+        leaveFullscreen()
         val url = when {
             text.startsWith("https://") -> text
             text.startsWith("http://") -> "https://" + text.removePrefix("http://")
@@ -186,11 +221,17 @@ internal fun browser(context: Context, shell: Shell): SpatialApp {
         }
         view.webChromeClient = object : WebChromeClient() {
             override fun onPermissionRequest(request: PermissionRequest) = request.deny()
+            override fun onShowCustomView(video: View, callback: CustomViewCallback) {
+                // A tab in the background may not take over the window.
+                if (view === web()) enterFullscreen(video, callback) else callback.onCustomViewHidden()
+            }
+            override fun onHideCustomView() { leaveFullscreen(tellPage = false) }
         }
         view.setDownloadListener { url, agent, disposition, mime, _ -> download(url, agent, disposition, mime) }
     }
 
     fun show(index: Int) {
+        leaveFullscreen()
         current = index
         pages.removeAllViews()
         pages.addView(web(), FrameLayout.LayoutParams(-1, -1))
@@ -206,6 +247,7 @@ internal fun browser(context: Context, shell: Shell): SpatialApp {
             go(home())
         }
         if (tabs.size > 1) strip.iconKey(R.drawable.ic_ui_close) {
+            leaveFullscreen()
             val old = tabs.removeAt(current)
             pages.removeView(old)
             old.destroy()
@@ -227,6 +269,8 @@ internal fun browser(context: Context, shell: Shell): SpatialApp {
     fun showBookmarks() = showList(bookmarks.all(), R.string.no_bookmarks)
 
     fun spoken(act: Act): Boolean {
+        // "Back" first closes a full screen video; any other browser command closes it and carries on.
+        if (leaveFullscreen() && act == Act.BACK) return true
         when (act) {
             Act.BACK -> { if (!web().canGoBack()) return false; web().goBack() }
             Act.FORWARD -> { if (!web().canGoForward()) return false; web().goForward() }
@@ -296,14 +340,22 @@ internal fun browser(context: Context, shell: Shell): SpatialApp {
         show(if (wanted != null) tabs.lastIndex else 0)
         if (wanted != null) go(wanted)
     }
+    chrome = view
+    val root = FrameLayout(context).apply {
+        addView(view, FrameLayout.LayoutParams(-1, -1))
+        addView(stage, FrameLayout.LayoutParams(-1, -1))
+    }
     // The shell reaches an already open browser through the root view's tag.
-    view.tag = { url: String -> go(url) }
-    return SpatialApp(view) {
+    root.tag = { url: String -> go(url) }
+    return SpatialApp(root) {
+        leaveFullscreen()
         persist()
         tabs.forEach { it.stopLoading(); it.destroy() }
         tabs.clear()
     }.also {
         it.command = ::spoken
         it.flush = ::persist
+        it.back = { leaveFullscreen() }
+        it.beforeReshape = { leaveFullscreen() }
     }
 }

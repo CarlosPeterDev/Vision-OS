@@ -826,4 +826,81 @@ class XrTest {
         assertEquals(-90.3f, peakDb(ShortArray(4)), 0.1f)
         assertEquals(0f, peakDb(shortArrayOf(Short.MIN_VALUE)), 0.01f)
     }
+
+    @Test fun inputUsesTheGeometryOnScreen() {
+        val m = WindowManager(); val w = m.open(AppType.NOTES, 0f)
+        // The target has jumped to the right, but the frame on screen still shows it ahead.
+        m.replace(w.copy(yaw = 1.2f))
+        m.present(listOf(w))
+        assertEquals(w.id, m.pick(forward)?.windowId)
+        assertNull(m.pick(ray(1.2f, 0f)))
+        m.present(listOf(m.get(w.id)!!))
+        assertNull(m.pick(forward))
+        assertEquals(w.id, m.pick(ray(1.2f, 0f))?.windowId)
+    }
+
+    @Test fun closingAndMinimizedWindowsTakeNoInput() {
+        val m = WindowManager(); val w = m.open(AppType.NOTES, 0f); m.present(listOf(w))
+        m.minimize(w.id); assertNull(m.pick(forward))
+        m.close(w.id); assertNull(m.pick(forward))
+    }
+
+    @Test fun overlappingPickMatchesWhatIsPaintedOnTop() {
+        val m = WindowManager()
+        val first = m.open(AppType.NOTES, 0f); val second = m.open(AppType.CLOCK, 0f)
+        // Same distance, angled apart: their planes cross, so ray depth disagrees with paint order.
+        m.replace(first.copy(yaw = -0.15f)); m.replace(second.copy(yaw = 0.15f))
+        for (aim in listOf(-0.08f, 0f, 0.08f)) assertEquals(second.id, m.pick(ray(aim, 0f))?.windowId)
+        m.focus(first.id)
+        for (aim in listOf(-0.08f, 0f, 0.08f)) assertEquals(first.id, m.pick(ray(aim, 0f))?.windowId)
+        assertEquals(first.id, paintOrder(m.windows, forward.origin).last().id)
+        // A nearer window wins whatever the focus is.
+        m.replace(m.get(second.id)!!.copy(distance = 1.2f))
+        assertEquals(second.id, m.pick(forward)?.windowId)
+    }
+
+    @Test fun animatorKeepsFocusOrderAndHeldWindowsDoNotLag() {
+        val m = WindowManager(); val a = WindowAnimator()
+        val first = m.open(AppType.NOTES, 0f); val second = m.open(AppType.CLOCK, 0f)
+        a.update(m.windows, 0.016f, 0)
+        m.focus(first.id)
+        assertEquals(listOf(second.id, first.id), a.update(m.windows, 0.016f, 0).map { it.window.id })
+        m.replace(m.get(first.id)!!.copy(yaw = 0.8f, distance = 2.4f))
+        assertTrue(a.update(m.windows, 0.016f, 0).last().window.yaw < 0.7f)
+        val held = a.update(m.windows, 0.016f, 0, setOf(first.id)).last().window
+        assertEquals(0.8f, held.yaw, 1e-5f); assertEquals(2.4f, held.distance, 1e-5f)
+    }
+
+    @Test fun grabbingAMovingWindowDoesNotJump() {
+        val m = WindowManager(); val w = m.open(AppType.NOTES, 0f)
+        val c = InteractionController(m, Recorder())
+        m.present(listOf(w))
+        m.replace(w.copy(yaw = 0.5f))
+        val grab = controlLayout(w).first { it.region == Region.GRAB }
+        val point = w.point(grab.x, grab.y)
+        val at = Ray(Vec3(0f, 0f, 0f), point * (1f / point.length))
+        c.handle(1, PointerPhase.DOWN, at)
+        c.handle(1, PointerPhase.MOVE, at)
+        assertEquals(0f, m.get(w.id)!!.yaw, 1e-3f)
+        assertEquals(w.pitch, m.get(w.id)!!.pitch, 1e-3f)
+    }
+
+    @Test fun skippingATutorialLessonDoesNotMasterIt() {
+        val t = TutorialProgress()
+        repeat(Lesson.entries.size) { t.begin(0); t.skip() }
+        assertNull(t.current); assertTrue(t.practised.isEmpty()); assertEquals("", t.encode())
+    }
+
+    @Test fun tutorialCountsOnlyActionsDoneDuringTheLesson() {
+        val t = TutorialProgress()
+        t.begin(4); assertFalse(t.observe(4))
+        assertTrue(t.observe(5)); assertEquals(Lesson.SCROLL, t.current)
+        t.skip(); assertEquals(Lesson.MOVE, t.current)
+        t.begin(2); assertFalse(t.observe(2)); assertTrue(t.observe(3))
+        assertEquals(setOf(Lesson.TAP, Lesson.MOVE), t.practised)
+        // Saved results survive a replay and unknown names are ignored.
+        val again = TutorialProgress(t.encode() + ",NOPE")
+        again.skip(); assertEquals(setOf(Lesson.TAP, Lesson.MOVE), again.practised)
+        again.restart(); assertEquals(Lesson.TAP, again.current)
+    }
 }

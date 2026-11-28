@@ -37,6 +37,10 @@ class SpatialApp(val view: View, val dispose: () -> Unit = {}) {
     var command: ((Act) -> Boolean)? = null
     /** Saves anything that must survive the app being closed by the system. */
     var flush: () -> Unit = {}
+    /** Handles Android Back inside the app, such as leaving full screen. */
+    var back: () -> Boolean = { false }
+    /** Runs before the views move to a window of a new shape. */
+    var beforeReshape: () -> Unit = {}
 }
 
 /**
@@ -116,6 +120,7 @@ class SpatialSurface(
     fun resize(newWidth: Int, newHeight: Int, resizeTexture: () -> Unit) {
         val virtual = display ?: return
         val view = app?.view ?: return
+        app?.beforeReshape?.invoke()
         show(null)
         gate.cancel()
         delivering = false
@@ -315,6 +320,8 @@ class SpatialSurface(
     fun command(act: Act): Boolean = app?.command?.invoke(act) == true
 
     fun flush() { app?.flush?.invoke() }
+
+    fun back(): Boolean = app?.back?.invoke() == true
 
     /** True when something that accepts text has the focus. */
     val hasTextFocus get() = root?.findFocus()?.let { it is android.widget.EditText || it is WebView } == true

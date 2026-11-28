@@ -125,6 +125,10 @@ class XrSettings(context: Context) {
     var haptics by Bool(true)
     var restoreLayout by Bool(true)
     var tutorialSeen by Bool(false)
+    /** Lessons really practised, as saved by TutorialProgress. */
+    var tutorialMastered: String
+        get() = prefs.getString("tutorialMastered", "") ?: ""
+        set(v) = prefs.edit().putString("tutorialMastered", v).apply()
     var folder: String
         get() = prefs.getString("folder", "") ?: ""
         set(v) = prefs.edit().putString("folder", v).apply()
