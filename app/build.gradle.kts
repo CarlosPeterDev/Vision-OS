@@ -11,7 +11,11 @@ android {
         applicationId = "com.nexus.visionos"
         minSdk = 29
         targetSdk = 36
-        ndk { abiFilters += "arm64-v8a" }
+        ndk {
+            abiFilters += "arm64-v8a"
+            // Only for emulator tests whose image cannot run ARM code; releases never set it.
+            if (project.hasProperty("emulatorAbi")) abiFilters += "x86_64"
+        }
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionName = "0.1.${System.getenv("GITHUB_RUN_NUMBER") ?: "0"}"
     }

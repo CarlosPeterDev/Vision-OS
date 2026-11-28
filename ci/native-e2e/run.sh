@@ -21,7 +21,8 @@ finish() {
   exit $fail
 }
 
-adb install -r --abi arm64-v8a app/build/outputs/apk/debug/app-debug.apk || exit 1
+adb wait-for-device
+adb install -r app/build/outputs/apk/debug/app-debug.apk || exit 1
 adb install -r ci/native-probe/out/target.apk || exit 1
 adb install -r e2e-input/shizuku.apk || exit 1
 adb shell pm grant $PKG android.permission.CAMERA
@@ -53,16 +54,13 @@ check "setup reaches Ready" wait_log "setup state READY" 30
 sleep 4
 adb exec-out screencap -p > e2e/setup-ready.png
 
-# The XR activity is not exported, so the test needs root adb to start it with a held head.
-# The Shizuku server was already started as shell and stays that way.
-adb root; sleep 4; adb wait-for-device
-check "Shizuku still runs as shell" bash -c "adb shell ps -A -o USER,NAME | grep -E '^shell +shizuku_server'"
+# Everything runs as the ordinary shell user, through the same buttons a person would press.
 read -r A B < <(adb shell wm size | grep -m1 'Physical size' | grep -o '[0-9]*x[0-9]*' | sed 's/x/ /')
 W=$((A > B ? A : B)); H=$((A > B ? B : A))
+open_in_nexus() { python3 $here/ui.py tap "Open Probe target in Nexus" 60; }
 
-adb shell am force-stop $PKG
 adb logcat -c
-adb shell am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --es native $TARGET > /dev/null
+check "open the test app from the setup screen's list" open_in_nexus
 check "Nexus's own service connected" wait_log "service connected" 90
 check "private display created" wait_log "display [0-9]* created" 30
 check "test app opened on it" wait_log "native app open on display" 40
@@ -83,17 +81,23 @@ adb shell am force-stop $PKG
 sleep 8
 check "no Nexus display is left after Nexus stops" bash -c "! adb shell dumpsys display | grep -q '\"nexus-native\"'"
 
-# Back, through the same command a spoken "go back" uses.
-adb shell am force-stop $TARGET
-adb logcat -c
-adb shell "am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --es native $TARGET --es say 'go back'" > /dev/null
-check "the app opens again" wait_log "target created on display [1-9]" 90
-check "Back reaches the app" wait_log "target destroyed" 60
+# Back, from a physical keyboard's Escape key, takes the same path as the window's Back button.
+reopen() {
+  adb shell am force-stop $PKG
+  adb shell am force-stop $TARGET
+  adb logcat -c
+  adb shell am start -W -n $PKG/.MainActivity > /dev/null
+  sleep 4
+  python3 $here/ui.py tap "Android apps setup" && sleep 3 && open_in_nexus
+}
+check "open the app again" reopen
+check "it starts on a new private display" wait_log "target created on display [1-9]" 90
+sleep 20
+adb shell input keyevent KEYCODE_ESCAPE
+check "Back reaches the app" wait_log "target got back" 40
 
 # Stopping Shizuku must close the window with a message and leave Nexus running.
-adb shell am force-stop $PKG
-adb logcat -c
-adb shell am start -W -n $PKG/.xr.XrActivity --ez fixedHead true --es native $TARGET > /dev/null
+check "open the app a third time" reopen
 if wait_log "native app open on display" 90; then
   sleep 8
   adb shell "pkill -f shizuku_server"; adb shell "pkill -f $PKG:nativedisplay"

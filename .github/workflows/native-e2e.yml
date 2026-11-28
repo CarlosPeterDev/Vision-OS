@@ -3,7 +3,7 @@ name: Native Apps end to end
 # Real Shizuku on an emulator, with a harmless test app of our own.
 on:
   push:
-    paths: ['ci/native-e2e/**', 'app/src/main/kotlin/com/nexus/visionos/nativeapps/**', 'app/src/main/aidl/**', '.github/workflows/native-e2e.yml']
+    paths: ['ci/native-e2e/**', 'app/build.gradle.kts', 'app/src/main/kotlin/com/nexus/visionos/nativeapps/**', 'app/src/main/aidl/**', '.github/workflows/native-e2e.yml']
   workflow_dispatch:
 
 permissions:
@@ -23,7 +23,7 @@ jobs:
         with: { distribution: temurin, java-version: '17' }
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: '8.11.1' }
-      - run: gradle :app:assembleDebug --stacktrace
+      - run: gradle :app:assembleDebug -PemulatorAbi --stacktrace
       - run: bash ci/native-probe/build.sh
       - name: Download the official Shizuku release
         env:
