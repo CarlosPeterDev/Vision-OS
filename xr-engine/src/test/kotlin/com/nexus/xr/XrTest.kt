@@ -933,6 +933,15 @@ class XrTest {
         assertEquals(120, NativeApps.density(200, 900)); assertEquals(320, NativeApps.density(1500, 1500))
     }
 
+    @Test fun voiceAndAiCannotPressAnythingThatReachesAnotherApp() {
+        for (region in listOf(Region.CONTENT, Region.BACK)) assertFalse(NativeApps.voiceMayPress(AppType.NATIVE, region, false))
+        assertTrue(NativeApps.voiceMayPress(AppType.NATIVE, Region.CLOSE, true))
+        assertFalse(NativeApps.voiceMayPress(AppType.NATIVE_APPS, Region.CONTENT, false))
+        assertFalse(NativeApps.voiceMayPress(AppType.KEYBOARD, Region.CONTENT, true))
+        assertTrue(NativeApps.voiceMayPress(AppType.KEYBOARD, Region.CONTENT, false))
+        assertTrue(NativeApps.voiceMayPress(AppType.BROWSER, Region.CONTENT, true))
+    }
+
     @Test fun installStatusesHavePlainOutcomes() {
         assertEquals(InstallOutcome.NEEDS_CONFIRMATION, installOutcome(-1))
         assertEquals(InstallOutcome.INSTALLED, installOutcome(0))

@@ -36,6 +36,17 @@ object NativeApps {
     /** System and security screens: never opened in a window and never sent input. */
     fun isProtected(packageName: String, ownPackage: String) = packageName == ownPackage || packageName in PROTECTED
 
+    /**
+     * Whether a spoken or AI-chosen "click" may press this spot. Anything that would send input to another
+     * app, or open one, needs the person's own hand, finger, mouse or controller.
+     */
+    fun voiceMayPress(app: AppType, region: Region, typingIntoNative: Boolean): Boolean = when (app) {
+        AppType.NATIVE -> region != Region.CONTENT && region != Region.BACK
+        AppType.NATIVE_APPS -> region != Region.CONTENT
+        AppType.KEYBOARD -> region != Region.CONTENT || !typingIntoNative
+        else -> true
+    }
+
     /** The window-local position as a pixel on the app's display. */
     fun pixel(u: Float, size: Int): Float = (u * size).coerceIn(0f, (size - 1).toFloat())
 

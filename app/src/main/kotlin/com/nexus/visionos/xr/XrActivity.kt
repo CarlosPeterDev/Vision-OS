@@ -53,6 +53,8 @@ import com.nexus.visionos.MicSource
 import com.nexus.visionos.VoiceStack
 import kotlinx.coroutines.withTimeoutOrNull
 import com.nexus.visionos.speechAttributes
+import com.nexus.xr.Hit
+import com.nexus.xr.NativeApps
 import com.nexus.xr.*
 import com.nexus.visionos.nativeapps.NativeAppsActivity
 import com.nexus.visionos.nativeapps.NativeProblem
@@ -845,7 +847,9 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
     }
 
     override fun airBack() {
-        if (windows.focused?.app == AppType.BROWSER || focusedNative() != null) { act(Act.BACK); return }
+        // A real key or controller button, so it may reach another app. Spoken "back" may not.
+        focusedNative()?.let { it.back(); return }
+        if (windows.focused?.app == AppType.BROWSER) { act(Act.BACK); return }
         act(Act.HIDE_KEYBOARD)
     }
 
@@ -1204,6 +1208,11 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
 
     /** The native window, when it is the one in use. */
     private fun focusedNative() = native?.takeIf { windows.focused?.id == nativeId }
+
+    private fun voiceMayPress(hit: Hit): Boolean {
+        val app = windows.get(hit.windowId)?.app ?: return false
+        return NativeApps.voiceMayPress(app, hit.region, focusedNative() != null)
+    }
 
     override fun onBack(windowId: Int) { if (windowId == nativeId) native?.back() }
 
@@ -1754,7 +1763,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
             VoiceCommand.Photo -> capturePhoto()
             is VoiceCommand.Do -> return act(command.act)
             is VoiceCommand.Type -> {
-                focusedNative()?.let { return it.type(command.text) }
+                // Voice and the AI model never drive another app (it runs through Shizuku).
+                if (focusedNative() != null) return false
                 return target()?.takeIf { it.hasTextFocus }?.type(command.text) == true
             }
             is VoiceCommand.Search -> openUrl(searchUrl(settings.searchEngine, command.query))
@@ -1769,6 +1779,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
                 )
             }
             is VoiceCommand.ClickLabel -> {
+                val app = windows.focused?.app
+                if (app != null && !NativeApps.voiceMayPress(app, Region.CONTENT, focusedNative() != null)) return false
                 val surface = target() ?: return false
                 surface.clickLabel(command.label) { found ->
                     if (!found) say(getString(R.string.label_not_found, command.label))
@@ -1801,8 +1813,8 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
             field.key(code)
             return true
         }
-        // "Back" goes to the other app when its window is the one in use.
-        if (act == Act.BACK) focusedNative()?.let { it.back(); return true }
+        // Not passed on to the other app, and not to some other window behind it either.
+        if (act == Act.BACK && focusedNative() != null) return false
         // The games use the movement words themselves.
         if (focused?.app == AppType.GAMES && surface?.command(act) == true) return true
         val look = look()
@@ -1841,12 +1853,13 @@ class XrActivity : ComponentActivity(), Shell, InteractionListener, AirActions {
             }
             Act.CLICK -> {
                 val ray = aimRay ?: return false
-                if (windows.pick(ray) == null) return false
+                val hit = windows.pick(ray) ?: return false
+                if (!voiceMayPress(hit)) return false
                 controller.handle(VOICE_POINTER, PointerPhase.DOWN, ray)
                 gl.postDelayed({ controller.handle(VOICE_POINTER, PointerPhase.UP, ray) }, 90)
             }
             Act.LONG_CLICK -> {
-                val hit = aimRay?.let(windows::pick)?.takeIf { it.region == Region.CONTENT } ?: return false
+                val hit = aimRay?.let(windows::pick)?.takeIf { it.region == Region.CONTENT && voiceMayPress(it) } ?: return false
                 return surfaces[hit.windowId]?.longPressAt(hit.u, hit.v) == true
             }
             Act.SCROLL_DOWN -> return surface?.scroll(1) == true
